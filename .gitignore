@@ -1,0 +1,103 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# backend: repositorio independiente (cultoteca-api)
+/server/
+
+# AI agents / herramientas de asistentes (configuración local)
+.agents/
+.amazonq/
+.atomcode/
+.augment/
+.bob/
+.claude/
+.cline/
+.clinerules/
+.codeartsdoer/
+.codeassistant/
+.codebuddy/
+.codestudio/
+.codex/
+.commandcode/
+.continue/
+.cospec/
+.crush/
+.cursor/
+.cursorrules
+.devin/
+.dsh/
+.easycode/
+.factory/
+.forge/
+.gemini/
+.gigacode/
+.grok/
+.hermes/
+.iflow/
+.junie/
+.kilo/
+.kilocode/
+.kimi-code/
+.kiro/
+.lingma/
+.omp/
+.opencode/
+.pi/
+.qoder/
+.qwen/
+.roo/
+.rovodev/
+.serena/
+.trae/
+.veai/
+.vibe/
+.warp/
+.zcode/
+.github/prompts/
+.github/skills/
+
+# OpenSpec
+openspec/
+
+# Firebase (cada desarrollador genera el suyo)
+google-services.json

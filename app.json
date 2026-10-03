@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Cultoteca",
+    "slug": "Cultoteca",
+    "version": "1.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0F172A",
+    "ios": {
+      "supportsTablet": true,
+      "backgroundColor": "#0F172A"
+    },
+    "android": {
+      "package": "com.luiscruzga.cultoteca",
+      "googleServicesFile": "./google-services.json",
+      "backgroundColor": "#0F172A",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "backgroundColor": "#0F172A",
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "55a40112-7d23-4706-a2bd-4cb26405b7c2"
+      }
+    },
+    "owner": "lcruga",
+    "plugins": [
+      "expo-web-browser",
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#38BDF8",
+          "defaultChannel": "default"
+        }
+      ]
+    ]
+  }
+}
