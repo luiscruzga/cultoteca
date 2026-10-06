@@ -1,0 +1,3 @@
+# El backend (server/) es un proyecto independiente (cultoteca-api) y no forma parte de la web
+/server/
+/openspec/
