@@ -5,6 +5,7 @@ import {
   FavoriteItem,
   ListActivityNotification,
   UserProfile,
+  WatchedEntry,
 } from '../types';
 
 export interface LoginLogEntry {
@@ -321,6 +322,33 @@ export const MongoDbService = {
     const res = await this.request<{ success: boolean }>('/api/favorites', {
       method: 'DELETE',
       body: { mediaId, listId, userId },
+    });
+    return Boolean(res?.success);
+  },
+
+  // ==========================================
+  // PERSONAL WATCHED
+  // ==========================================
+
+  /** True when requests can reach the backend with a verified session. */
+  async hasSession(): Promise<boolean> {
+    return Boolean(API_BASE_URL) && Boolean(await getAuthToken());
+  },
+
+  async getWatched(): Promise<WatchedEntry[] | null> {
+    const res = await this.request<{ documents: WatchedEntry[] }>('/api/watched');
+    return res?.documents || null;
+  },
+
+  async upsertWatched(entry: WatchedEntry): Promise<boolean> {
+    const res = await this.request<{ success: boolean }>('/api/watched', { method: 'PUT', body: entry });
+    return Boolean(res?.success);
+  },
+
+  async removeWatched(workKeys: string[], sourceId?: string): Promise<boolean> {
+    const res = await this.request<{ success: boolean }>('/api/watched', {
+      method: 'DELETE',
+      body: { workKeys, sourceId },
     });
     return Boolean(res?.success);
   },

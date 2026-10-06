@@ -1,6 +1,6 @@
 {
   "name": "cultoteca",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "index.ts",
   "dependencies": {
     "@clerk/clerk-expo": "^2.20.1",
@@ -33,7 +33,8 @@
     "web": "NODE_TLS_REJECT_UNAUTHORIZED=0 expo start --web",
     "server": "NODE_TLS_REJECT_UNAUTHORIZED=0 npm --prefix server start",
     "lint": "expo lint",
-    "build:web": "expo export -p web && node scripts/fix-web-assets.js"
+    "build:web": "expo export -p web && node scripts/fix-web-assets.js",
+    "apk": "NODE_TLS_REJECT_UNAUTHORIZED=0 eas build -p android --profile preview"
   },
   "private": true
 }

@@ -23,6 +23,8 @@ interface CultoRouletteModalProps {
   listTitle: string;
   onViewSelected: (item: MediaItem) => void;
   onSpinComplete?: (winner: MediaItem | null) => void;
+  /** Personal watched predicate of the current user; watched works are excluded. */
+  isWatched: (item: MediaItem) => boolean;
 }
 
 export const CultoRouletteModal: React.FC<CultoRouletteModalProps> = ({
@@ -32,17 +34,18 @@ export const CultoRouletteModal: React.FC<CultoRouletteModalProps> = ({
   listTitle,
   onViewSelected,
   onSpinComplete,
+  isWatched,
 }) => {
   const [spinning, setSpinning] = useState(false);
   const [selectedWinner, setSelectedWinner] = useState<MediaItem | null>(null);
   const [spinAnim] = useState(new Animated.Value(0));
 
-  const unwatchedItems = items.filter(item => !item.isWatched);
+  const unwatchedItems = items.filter(item => !isWatched(item));
   const [displayItem, setDisplayItem] = useState<MediaItem | null>(unwatchedItems[0] || null);
 
   useEffect(() => {
     if (unwatchedItems.length > 0) {
-      if (!displayItem || displayItem.isWatched) {
+      if (!displayItem || isWatched(displayItem)) {
         setDisplayItem(unwatchedItems[0]);
       }
     } else {
@@ -66,7 +69,7 @@ export const CultoRouletteModal: React.FC<CultoRouletteModalProps> = ({
 
       if (count >= maxCycles) {
         clearInterval(interval);
-        const result = CultoRouletteService.spin(items);
+        const result = CultoRouletteService.spin(items, { isWatched });
         setSelectedWinner(result.selected);
         setDisplayItem(result.selected);
         setSpinning(false);

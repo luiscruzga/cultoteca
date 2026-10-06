@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +8,7 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  SectionList,
   StatusBar,
   StyleSheet,
   Text,
@@ -38,7 +39,8 @@ import { StorageService } from './src/services/storageService';
 import { UpdateService } from './src/services/updateService';
 import { MediaListSkeleton, ListChipsSkeleton } from './src/components/Skeleton';
 import { ListFormModal, ListFormValues } from './src/components/ListFormModal';
-import { LIST_CONTENT_TYPES, describeAllowedCategories, getAllowedCategories, isCategoryAllowed } from './src/utils/listCategories';
+import { isItemInList, isSameWork, isWatchedIn, toWatchedEntry, toWork } from './src/utils/mediaIdentity';
+import { LIST_CONTENT_TYPES, describeAllowedCategories, getAllowedCategories, isCategoryAllowed, toListContentType } from './src/utils/listCategories';
 import { ItemSortMode, sortItems } from './src/utils/ratings';
 import { remoteImageSource } from './src/utils/remoteImage';
 import { HomeFeed } from './src/components/HomeFeed';
@@ -70,6 +72,7 @@ import {
   MediaItem,
   UpdateInfo,
   UserProfile,
+  WatchedEntry,
 } from './src/types';
 import { ClerkProvider } from '@clerk/clerk-expo';
 import { tokenCache } from './src/services/clerkTokenCache';
@@ -128,6 +131,11 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [isRefreshingLists, setIsRefreshingLists] = useState(false);
   const [listNotifications, setListNotifications] = useState<ListActivityNotification[]>([]);
   const [directRecommendations, setDirectRecommendations] = useState<DirectRecommendation[]>([]);
+  // Personal watched works of the current user (shared across all lists, private to them).
+  const [watchedState, setWatchedState] = useState<{ userId: string; entries: WatchedEntry[] }>({
+    userId: '',
+    entries: [],
+  });
   // When push is registered the backend notifies the device; otherwise new activity is shown locally.
   const pushRegisteredRef = useRef(false);
 
@@ -241,6 +249,46 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     await openListItem(notif.listId, notif.action === 'item_removed' ? null : notif.mediaId || notif.mediaItem?.id);
   };
 
+  // Entries loaded for another (or no) user are ignored until the current user's ones arrive.
+  const profileId = profile?.id;
+  const watchedEntries = useMemo(
+    () => (profileId && watchedState.userId === profileId ? watchedState.entries : []),
+    [profileId, watchedState]
+  );
+  const setWatchedEntries = (entries: WatchedEntry[]) => {
+    if (profile?.id) setWatchedState({ userId: profile.id, entries });
+  };
+  useEffect(() => {
+    const userId = profile?.id;
+    if (!userId) return;
+    let cancelled = false;
+    StorageService.getWatched(userId).then(entries => {
+      if (!cancelled) setWatchedState({ userId, entries });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
+
+  const isWatchedByMe = useCallback((item: MediaItem) => isWatchedIn(item, watchedEntries), [watchedEntries]);
+
+  const handleToggleWatched = async (item: MediaItem) => {
+    if (!profile) return;
+    const previous = watchedEntries;
+    const watched = !isWatchedIn(item, previous);
+    // Optimistic update; reverted if persisting fails.
+    const optimistic = watched
+      ? [toWatchedEntry(item), ...previous]
+      : previous.filter(entry => !isSameWork(toWork(item), entry));
+    setWatchedEntries(optimistic);
+    try {
+      setWatchedEntries(await StorageService.setWatched(profile.id, item, watched, previous));
+    } catch (err) {
+      setWatchedEntries(previous);
+      Alert.alert('No se pudo guardar', err instanceof Error ? err.message : 'Inténtalo de nuevo.');
+    }
+  };
+
   const homeFeed = useMemo(
     () =>
       buildHomeFeed({
@@ -248,8 +296,9 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
         userId: profile?.id ?? '',
         followedListIds,
         recommendations: directRecommendations,
+        isWatched: isWatchedByMe,
       }),
-    [lists, profile?.id, followedListIds, directRecommendations]
+    [lists, profile?.id, followedListIds, directRecommendations, isWatchedByMe]
   );
 
   // Native notifications: register push, show local fallback while open and navigate on tap.
@@ -480,9 +529,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const handleAddMedia = async (item: MediaItem) => {
     if (!selectedList) return;
     const listId = selectedList.id;
-    const isDuplicate = selectedList.items.some(
-      i => i.title.toLowerCase() === item.title.toLowerCase() && i.category === item.category
-    );
+    const isDuplicate = isItemInList(item, selectedList.items);
     if (isDuplicate) {
       Alert.alert('Ya está en la lista', `«${item.title}» ya forma parte de «${selectedList.title}».`);
       return;
@@ -648,6 +695,12 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
         itemSortMode
       )
     : [];
+  // Group the (already filtered and sorted) items by content type, in catalog order.
+  const itemSections = LIST_CONTENT_TYPES.map(type => ({
+    key: type.key,
+    title: `${type.emoji} ${type.label}`,
+    data: filteredItems.filter(item => toListContentType(item.category) === type.key),
+  })).filter(section => section.data.length > 0);
   const canAddToSelectedList = Boolean(
     selectedList && profile && StorageService.canUserContribute(selectedList, profile.id, followedListIds)
   );
@@ -1106,11 +1159,18 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             </View>
           )}
 
-          {/* Media Items List */}
-          <FlatList
-            data={filteredItems}
+          {/* Media Items List, grouped by content type */}
+          <SectionList
+            sections={itemSections}
             keyExtractor={item => item.id}
             contentContainerStyle={styles.mediaItemsList}
+            stickySectionHeadersEnabled={false}
+            renderSectionHeader={({ section }) => (
+              <View style={styles.itemSectionHeader}>
+                <Text style={styles.itemSectionTitle}>{section.title}</Text>
+                <Text style={styles.itemSectionCount}>{section.data.length}</Text>
+              </View>
+            )}
             refreshControl={
               <RefreshControl
                 refreshing={isRefreshingLists}
@@ -1120,7 +1180,13 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
               />
             }
             renderItem={({ item }) => (
-              <MediaCard item={item} onPress={() => handleMediaPress(item)} isSaving={savingItemIds.includes(item.id)} />
+              <MediaCard
+                item={item}
+                onPress={() => handleMediaPress(item)}
+                isSaving={savingItemIds.includes(item.id)}
+                isWatched={isWatchedByMe(item)}
+                onToggleWatched={handleToggleWatched}
+              />
             )}
             ListEmptyComponent={
               <View style={styles.emptyItemsView}>
@@ -1175,7 +1241,13 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             keyExtractor={item => item.id}
             contentContainerStyle={styles.mediaItemsList}
             renderItem={({ item }) => (
-              <MediaCard item={item} onPress={() => handleMediaPress(item)} isSaving={savingItemIds.includes(item.id)} />
+              <MediaCard
+                item={item}
+                onPress={() => handleMediaPress(item)}
+                isSaving={savingItemIds.includes(item.id)}
+                isWatched={isWatchedByMe(item)}
+                onToggleWatched={handleToggleWatched}
+              />
             )}
             ListEmptyComponent={
               <View style={styles.emptyItemsView}>
@@ -1307,6 +1379,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           onDeleteItem={handleDeleteItem}
           listOwnerId={selectedList?.owner.id}
           currentUser={{ id: profile.id, name: profile.name, avatar: profile.avatar || '' }}
+          isWatched={isWatchedByMe(selectedMedia)}
+          onToggleWatched={handleToggleWatched}
         />
       )}
 
@@ -1318,6 +1392,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           currentUser={{ id: profile.id, name: profile.name, avatar: profile.avatar }}
           defaultCategory={activeCategoryFilter}
           allowedCategories={getAllowedCategories(selectedList)}
+          existingItems={selectedList?.items ?? []}
         />
       )}
 
@@ -1328,6 +1403,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           items={selectedList.items}
           listTitle={selectedList.title}
           onViewSelected={handleMediaPress}
+          isWatched={isWatchedByMe}
         />
       )}
 
@@ -1800,6 +1876,28 @@ const styles = StyleSheet.create({
   activeFilterChipText: {
     color: '#0F172A',
     fontWeight: '800',
+  },
+  itemSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  itemSectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#E2E8F0',
+  },
+  itemSectionCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
   },
   mediaItemsList: {
     paddingHorizontal: 18,

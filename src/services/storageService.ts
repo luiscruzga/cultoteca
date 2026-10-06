@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityEvent, CollaborativeList, CustomCategory, DirectRecommendation, FavoriteItem, ListActivityNotification, ListInvitation, MediaComment, MediaItem, ReleaseTrackingInfo, UserProfile } from '../types';
+import { ActivityEvent, CollaborativeList, CustomCategory, DirectRecommendation, FavoriteItem, ListActivityNotification, ListInvitation, MediaComment, MediaItem, ReleaseTrackingInfo, UserProfile, WatchedEntry } from '../types';
 import { CURATED_CULT_CATALOG } from './api/mediaSearchService';
 import { cancelReleaseNotification } from './releaseTrackingService';
 import { MongoDbService, LoginLogEntry, AuditLogEntry } from './mongoDbService';
 import { Platform } from 'react-native';
 import { isCategoryAllowed } from '../utils/listCategories';
+import { isItemInList, isSameWork, toWatchedEntry, toWork } from '../utils/mediaIdentity';
 
 const LISTS_KEY = '@cultoteca_lists_v1';
 const PROFILE_KEY = '@cultoteca_profile_v1';
@@ -12,6 +13,7 @@ const ACTIVITY_KEY = '@cultoteca_activity_v1';
 const CUSTOM_CATEGORIES_KEY = '@cultoteca_custom_categories_v1';
 const USERS_DIRECTORY_KEY = '@cultoteca_users_directory_v1';
 const FAVORITES_KEY = '@cultoteca_favorites_v1';
+const WATCHED_KEY = '@cultoteca_watched_v1';
 const RECOMMENDATIONS_KEY = '@cultoteca_recommendations_v1';
 const LIST_NOTIFICATIONS_KEY = '@cultoteca_list_notifications_v1';
 const FOLLOWED_LISTS_KEY = '@cultoteca_followed_lists_v1';
@@ -136,10 +138,8 @@ export const StorageService = {
       if (!isCategoryAllowed(targetList, item.category)) {
         throw new Error('Esta lista no admite este tipo de contenido.');
       }
-      // Avoid duplicate by title & category
-      const exists = targetList.items.some(
-        i => i.title.toLowerCase() === item.title.toLowerCase() && i.category === item.category
-      );
+      // Avoid duplicates of the same work
+      const exists = isItemInList(item, targetList.items);
       if (!exists) {
         targetList.items.unshift(item);
         targetList.updatedAt = new Date().toISOString();
@@ -934,6 +934,52 @@ export const StorageService = {
   async getPublicLists(): Promise<CollaborativeList[]> {
     const lists = await this.getLists();
     return lists.filter(l => l.isPublic);
+  },
+
+  /** Personal watched works of the signed-in user (backend first, local cache as fallback). */
+  async getWatched(userId: string): Promise<WatchedEntry[]> {
+    const cacheKey = `${WATCHED_KEY}:${userId}`;
+    try {
+      const remote = await MongoDbService.getWatched();
+      if (remote) {
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(remote));
+        return remote;
+      }
+      const data = await AsyncStorage.getItem(cacheKey);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Marks or unmarks a work as watched for the current user, in every list.
+   * Throws if the backend is reachable with a session but rejects the change.
+   */
+  async setWatched(
+    userId: string,
+    item: MediaItem,
+    watched: boolean,
+    current: WatchedEntry[]
+  ): Promise<WatchedEntry[]> {
+    const work = toWork(item);
+    const matching = current.filter(entry => isSameWork(work, entry));
+    const others = current.filter(entry => !isSameWork(work, entry));
+    const entry = toWatchedEntry(item);
+    const updated = watched ? [entry, ...others] : others;
+
+    if (await MongoDbService.hasSession()) {
+      const ok = watched
+        ? await MongoDbService.upsertWatched(entry)
+        : await MongoDbService.removeWatched(
+            Array.from(new Set([entry.workKey, ...matching.map(m => m.workKey)])),
+            entry.sourceId
+          );
+      if (!ok) throw new Error('No se pudo guardar el estado de visto.');
+    }
+
+    await AsyncStorage.setItem(`${WATCHED_KEY}:${userId}`, JSON.stringify(updated));
+    return updated;
   },
 
   async getFavorites(userId?: string): Promise<FavoriteItem[]> {

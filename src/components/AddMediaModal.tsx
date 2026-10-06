@@ -28,6 +28,7 @@ import { RatingStars } from './RatingStars';
 import { SearchLoadingSkeleton } from './SearchLoadingSkeleton';
 import { MediaDetailModal } from './MediaDetailModal';
 import { remoteImageSource } from '../utils/remoteImage';
+import { isItemInList } from '../utils/mediaIdentity';
 
 interface AddMediaModalProps {
   visible: boolean;
@@ -40,6 +41,8 @@ interface AddMediaModalProps {
   onRecommendDirectly?: (item: MediaItem) => void;
   /** Content types accepted by the target list; omit to allow everything. */
   allowedCategories?: ListContentType[];
+  /** Items already in the target list: matching search results can't be added again. */
+  existingItems?: MediaItem[];
 }
 
 const SEARCH_DEBOUNCE_MS = 2000;
@@ -114,6 +117,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   onAddCustomCategory,
   onRecommendDirectly,
   allowedCategories = ALL_LIST_CONTENT_TYPES,
+  existingItems = [],
 }) => {
   const [preferredTab, setTab] = useState<'search' | 'link' | 'manual'>('search');
   const [newCatInput, setNewCatInput] = useState('');
@@ -364,6 +368,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       ...item,
       // The provider score is the critic rating; list users' ratings are tracked separately.
       criticRating: item.criticRating ?? (item.averageRating > 0 ? item.averageRating : undefined),
+      sourceId: item.sourceId ?? item.id,
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       addedBy: currentUser,
       addedAt: new Date().toISOString(),
@@ -635,22 +640,29 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                           <Text style={styles.recommendMiniBtnText}>Recomendar</Text>
                         </TouchableOpacity>
                       )}
-                      <TouchableOpacity
-                        style={styles.addBtn}
-                        onPress={(e) => {
-                          e.stopPropagation?.();
-                          withFullDetails(item, handleSelectApiItem);
-                        }}
-                        disabled={pendingItemId !== null}
-                        activeOpacity={0.8}
-                      >
-                        {pendingItemId === item.id ? (
-                          <ActivityIndicator size="small" color="#0F172A" />
-                        ) : (
-                          <Ionicons name="add" size={18} color="#0F172A" />
-                        )}
-                        <Text style={styles.addBtnText}>Añadir</Text>
-                      </TouchableOpacity>
+                      {isItemInList(item, existingItems) ? (
+                        <View style={styles.inListChip} accessibilityLabel={`${item.title} ya está en la lista`}>
+                          <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                          <Text style={styles.inListChipText}>Ya en la lista</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.addBtn}
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            withFullDetails(item, handleSelectApiItem);
+                          }}
+                          disabled={pendingItemId !== null}
+                          activeOpacity={0.8}
+                        >
+                          {pendingItemId === item.id ? (
+                            <ActivityIndicator size="small" color="#0F172A" />
+                          ) : (
+                            <Ionicons name="add" size={18} color="#0F172A" />
+                          )}
+                          <Text style={styles.addBtnText}>Añadir</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </TouchableOpacity>
                 )}
@@ -973,6 +985,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
             item={previewItem}
             visible={Boolean(previewItem)}
             onClose={closePreview}
+            isAlreadyInList={isItemInList(previewItem, existingItems)}
             onAddMedia={(selected) => {
               withFullDetails(selected, full => {
                 handleSelectApiItem(full);
@@ -1257,6 +1270,24 @@ const styles = StyleSheet.create({
     gap: 4,
     flexShrink: 0,
     alignSelf: 'center',
+  },
+  inListChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 4,
+    flexShrink: 0,
+    alignSelf: 'center',
+  },
+  inListChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10B981',
   },
   addBtnText: {
     fontSize: 12,

@@ -14,3 +14,20 @@ export const remoteImageSource = (uri?: string | null): ImageURISource => {
   }
   return { uri };
 };
+
+/**
+ * Highest-resolution variant of a known provider image URL (for the enlarged viewer).
+ * Unknown hosts are returned unchanged.
+ */
+export const getHighResImageUrl = (uri?: string | null): string | undefined => {
+  if (!uri) return undefined;
+  return uri
+    // TMDB: /t/p/w500/... → /t/p/original/...
+    .replace(/(image\.tmdb\.org\/t\/p\/)w\d+\//, '$1original/')
+    // RAWG: /media/crop/600/400/... or /media/resize/640/-/... → /media/...
+    .replace(/(media\.rawg\.io\/media\/)(?:crop\/\d+\/\d+|resize\/\d+\/-)\//, '$1')
+    // iTunes artwork: 600x600bb → 1200x1200bb
+    .replace(/(mzstatic\.com\/.+\/)\d+x\d+bb\./, (_, prefix) => `${prefix}1200x1200bb.`)
+    // MangaDex covers: file.jpg.512.jpg → file.jpg
+    .replace(/(uploads\.mangadex\.org\/covers\/.+?)\.(?:256|512)\.jpg$/, '$1');
+};

@@ -10,7 +10,9 @@ import { getCriticRating, getListRating } from '../utils/ratings';
 interface MediaCardProps {
   item: MediaItem;
   onPress: () => void;
-  onToggleWatched?: (mediaId: string) => void;
+  /** Personal watched state of the current user (not the shared item flag). */
+  isWatched?: boolean;
+  onToggleWatched?: (item: MediaItem) => void;
   isFavorite?: boolean;
   onToggleFavorite?: (item: MediaItem) => void;
   onRecommendToFriend?: (item: MediaItem) => void;
@@ -73,6 +75,7 @@ const getWatchedLabel = (category: string, uppercase: boolean = false): string =
 export const MediaCard: React.FC<MediaCardProps> = ({
   item,
   onPress,
+  isWatched = false,
   onToggleWatched,
   isFavorite = false,
   onToggleFavorite,
@@ -99,7 +102,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       {/* Poster with watched ribbon */}
       <View style={styles.posterContainer}>
         <Image source={remoteImageSource(item.posterUrl)} style={styles.poster} resizeMode="cover" />
-        {item.isWatched && (
+        {isWatched && (
           <View style={styles.watchedRibbon}>
             <Ionicons name="checkmark-done" size={11} color="#FFFFFF" />
             <Text style={styles.watchedRibbonText}>
@@ -268,17 +271,20 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <View style={styles.footerActions}>
             {onToggleWatched && (
               <TouchableOpacity
-                onPress={() => onToggleWatched(item.id)}
-                style={[styles.watchedToggleBtn, item.isWatched && styles.watchedToggleBtnActive]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onToggleWatched(item);
+                }}
+                style={[styles.watchedToggleBtn, isWatched && styles.watchedToggleBtnActive]}
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name={item.isWatched ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                  name={isWatched ? 'checkmark-circle' : 'checkmark-circle-outline'}
                   size={14}
-                  color={item.isWatched ? '#10B981' : '#94A3B8'}
+                  color={isWatched ? '#10B981' : '#94A3B8'}
                 />
-                <Text style={[styles.watchedToggleText, item.isWatched && styles.watchedToggleTextActive]}>
-                  {item.isWatched ? getWatchedLabel(item.category) : 'Pendiente'}
+                <Text style={[styles.watchedToggleText, isWatched && styles.watchedToggleTextActive]}>
+                  {isWatched ? getWatchedLabel(item.category) : 'Pendiente'}
                 </Text>
               </TouchableOpacity>
             )}

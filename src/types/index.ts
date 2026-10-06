@@ -86,6 +86,7 @@ export interface PersonDetails {
 
 export interface MediaItem {
   id: string;
+  sourceId?: string; // Id original del proveedor (ej. "tmdb-movie-123"); identifica la obra entre listas
   title: string;
   originalTitle?: string;
   category: MediaCategory;
@@ -199,6 +200,17 @@ export interface UserProfile {
   activeSubscriptions: string[]; // e.g. ['Netflix', 'Prime Video', 'Crunchyroll']
   friends?: string[]; // IDs o códigos de usuarios conectados
   followedLists?: string[]; // IDs de listas seguidas por el usuario
+}
+
+/** Obra marcada como vista por un usuario; se aplica en todas las listas donde aparezca. */
+export interface WatchedEntry {
+  userId?: string;
+  workKey: string;
+  sourceId?: string;
+  title: string;
+  category: MediaCategory;
+  year?: number;
+  watchedAt: string;
 }
 
 export interface FavoriteItem {

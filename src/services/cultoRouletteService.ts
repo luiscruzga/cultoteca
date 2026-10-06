@@ -4,6 +4,8 @@ export interface RouletteFilters {
   platform?: string;
   minRating?: number;
   includeWatched?: boolean;
+  /** Personal watched predicate of the current user. */
+  isWatched?: (item: MediaItem) => boolean;
 }
 
 export const CultoRouletteService = {
@@ -12,10 +14,11 @@ export const CultoRouletteService = {
       return { selected: null, poolCount: 0 };
     }
 
-    // By default, exclude items already marked as watched/read
+    // By default, exclude items the current user already watched/read
+    const isWatched = filters?.isWatched ?? (() => false);
     let candidatePool = filters?.includeWatched
       ? [...items]
-      : items.filter(item => !item.isWatched);
+      : items.filter(item => !isWatched(item));
 
     if (filters?.platform && filters.platform !== 'all') {
       candidatePool = candidatePool.filter(item =>

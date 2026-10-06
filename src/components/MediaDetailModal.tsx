@@ -18,6 +18,7 @@ import { ProviderBadge } from './ProviderBadge';
 import { RatingStars } from './RatingStars';
 import { ConfirmModal } from './ConfirmModal';
 import { PersonDetailModal } from './PersonDetailModal';
+import { ImageViewerModal } from './ImageViewerModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { getCriticRating, getListRating } from '../utils/ratings';
 
@@ -27,8 +28,12 @@ interface MediaDetailModalProps {
   onClose: () => void;
   onAddComment?: (mediaId: string, text: string, rating: number) => void;
   currentUser?: { id: string; name: string; avatar: string };
-  onToggleWatched?: (mediaId: string) => void;
+  /** Personal watched state of the current user (not the shared item flag). */
+  isWatched?: boolean;
+  onToggleWatched?: (item: MediaItem) => void;
   onAddMedia?: (item: MediaItem) => void;
+  /** Search preview of a work already in the target list: hide the add action. */
+  isAlreadyInList?: boolean;
   embedded?: boolean;
   listOwnerId?: string;
   onDeleteItem?: (mediaId: string) => void;
@@ -75,8 +80,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   onClose,
   onAddComment,
   currentUser,
+  isWatched = false,
   onToggleWatched,
   onAddMedia,
+  isAlreadyInList = false,
   embedded = false,
   listOwnerId,
   onDeleteItem,
@@ -89,6 +96,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [userRating, setUserRating] = useState(5);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<CastMember | null>(null);
+  const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
 
   if (!item || !visible) return null;
 
@@ -179,7 +187,20 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Main Info Hero */}
           <View style={styles.heroSection}>
-            <Image source={remoteImageSource(item.posterUrl)} style={styles.poster} resizeMode="cover" />
+            <TouchableOpacity
+              onPress={() => setIsImageViewerVisible(true)}
+              disabled={!item.posterUrl}
+              activeOpacity={0.85}
+              accessibilityRole="imagebutton"
+              accessibilityLabel={`Ampliar imagen de ${item.title}`}
+            >
+              <Image source={remoteImageSource(item.posterUrl)} style={styles.poster} resizeMode="cover" />
+              {item.posterUrl ? (
+                <View style={styles.posterZoomHint}>
+                  <Ionicons name="expand-outline" size={14} color="#FFFFFF" />
+                </View>
+              ) : null}
+            </TouchableOpacity>
             <View style={styles.heroDetails}>
               <Text style={styles.title}>{item.title}</Text>
               {item.originalTitle && <Text style={styles.originalTitle}>{item.originalTitle}</Text>}
@@ -262,7 +283,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           )}
 
           {/* Add to list CTA if in search preview mode */}
-          {onAddMedia && (
+          {onAddMedia && isAlreadyInList && (
+            <View style={styles.alreadyInListBadge}>
+              <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+              <Text style={styles.alreadyInListText}>Ya en la lista</Text>
+            </View>
+          )}
+          {onAddMedia && !isAlreadyInList && (
             <TouchableOpacity
               style={styles.addToListCtaBtn}
               onPress={() => {
@@ -279,17 +306,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           {/* Watched / Read / Played Toggle Button */}
           {!onAddMedia && onToggleWatched && (
             <TouchableOpacity
-              style={[styles.watchedDetailBtn, item.isWatched && styles.watchedDetailBtnActive]}
-              onPress={() => onToggleWatched(item.id)}
+              style={[styles.watchedDetailBtn, isWatched && styles.watchedDetailBtnActive]}
+              onPress={() => onToggleWatched(item)}
               activeOpacity={0.8}
             >
               <Ionicons
-                name={item.isWatched ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                name={isWatched ? 'checkmark-circle' : 'checkmark-circle-outline'}
                 size={20}
-                color={item.isWatched ? '#10B981' : '#94A3B8'}
+                color={isWatched ? '#10B981' : '#94A3B8'}
               />
-              <Text style={[styles.watchedDetailBtnText, item.isWatched && styles.watchedDetailBtnTextActive]}>
-                {item.isWatched
+              <Text style={[styles.watchedDetailBtnText, isWatched && styles.watchedDetailBtnTextActive]}>
+                {isWatched
                   ? (item.category === 'link' || item.category === 'book' || item.category === 'manga'
                       ? '✓ Ya lo has leído'
                       : item.category === 'game' || item.category === 'boardgame'
@@ -716,6 +743,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       </View>
   );
 
+  const imageViewer = (
+    <ImageViewerModal
+      uri={item.posterUrl}
+      visible={isImageViewerVisible}
+      onClose={() => setIsImageViewerVisible(false)}
+      accessibilityLabel={item.title}
+    />
+  );
+
   const personModal = selectedPerson && (
     <PersonDetailModal
       key={selectedPerson.id ?? selectedPerson.name}
@@ -742,6 +778,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           onCancel={() => setShowDeleteConfirm(false)}
         />
         {personModal}
+        {imageViewer}
       </>
     );
   }
@@ -761,6 +798,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         onCancel={() => setShowDeleteConfirm(false)}
       />
       {personModal}
+      {imageViewer}
     </Modal>
   );
 };
@@ -867,6 +905,17 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontWeight: '500',
   },
+  posterZoomHint: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   addToListCtaBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -882,6 +931,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  alreadyInListBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  alreadyInListText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#10B981',
   },
   addToListCtaBtnText: {
     fontSize: 15,

@@ -131,12 +131,15 @@ export const buildHomeFeed = ({
   userId,
   followedListIds,
   recommendations,
+  isWatched = () => false,
   now = Date.now(),
 }: {
   lists: CollaborativeList[];
   userId: string;
   followedListIds: string[];
   recommendations: DirectRecommendation[];
+  /** Personal watched predicate of the current user. */
+  isWatched?: (item: MediaItem) => boolean;
   now?: number;
 }): HomeFeed => {
   const myLists = lists.filter(l => isMember(l, userId));
@@ -176,7 +179,7 @@ export const buildHomeFeed = ({
 
   // Next up: best rated items still pending in my lists.
   const nextUp = myLists
-    .flatMap(list => list.items.filter(item => !item.isWatched && item.category !== 'link').map(item => ({ item, list })))
+    .flatMap(list => list.items.filter(item => !isWatched(item) && item.category !== 'link').map(item => ({ item, list })))
     .sort(
       (a, b) =>
         (getListRating(b.item).average ?? getCriticRating(b.item) ?? 0) -
