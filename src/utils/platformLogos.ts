@@ -1,5 +1,7 @@
 import { StreamingProvider } from '../types';
 
+export type PlatformGroup = 'video' | 'music' | 'reading' | 'games';
+
 export interface PlatformBrandInfo {
   name: string;
   shortName: string;
@@ -9,14 +11,145 @@ export interface PlatformBrandInfo {
   iconFallback: string;
 }
 
-const BRAND_CATALOG: {
+interface BrandEntry {
   keywords: string[];
   domain: string;
   shortName: string;
   brandColor: string;
   textColor: string;
   iconFallback: string;
-}[] = [
+  /** Group shown in the profile platforms picker; entries without a group are not offered there. */
+  group?: PlatformGroup;
+}
+
+// Resolution takes the first matching entry, so specific brands go before generic ones
+// (e.g. "Apple Music" before "Apple TV+", "Xbox Game Pass" before "Xbox").
+const BRAND_CATALOG: BrandEntry[] = [
+  {
+    keywords: ['google play books', 'google play libros'],
+    domain: 'play.google.com',
+    shortName: 'Google Play Books',
+    brandColor: '#4285F4',
+    textColor: '#FFFFFF',
+    iconFallback: 'book',
+    group: 'reading',
+  },
+  {
+    keywords: ['apple music'],
+    domain: 'music.apple.com',
+    shortName: 'Apple Music',
+    brandColor: '#FA243C',
+    textColor: '#FFFFFF',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['apple books', 'ibooks'],
+    domain: 'books.apple.com',
+    shortName: 'Apple Books',
+    brandColor: '#FF9500',
+    textColor: '#FFFFFF',
+    iconFallback: 'book',
+    group: 'reading',
+  },
+  {
+    keywords: ['apple arcade'],
+    domain: 'apple.com',
+    shortName: 'Apple Arcade',
+    brandColor: '#1C1C1E',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['amazon music'],
+    domain: 'music.amazon.com',
+    shortName: 'Amazon Music',
+    brandColor: '#25D1DA',
+    textColor: '#0F172A',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['youtube music'],
+    domain: 'music.youtube.com',
+    shortName: 'YouTube Music',
+    brandColor: '#FF0000',
+    textColor: '#FFFFFF',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['youtube premium'],
+    domain: 'youtube.com',
+    shortName: 'YouTube Premium',
+    brandColor: '#FF0000',
+    textColor: '#FFFFFF',
+    iconFallback: 'logo-youtube',
+    group: 'video',
+  },
+  {
+    keywords: ['kindle unlimited'],
+    domain: 'amazon.com',
+    shortName: 'Kindle Unlimited',
+    brandColor: '#E67E22',
+    textColor: '#FFFFFF',
+    iconFallback: 'book-outline',
+    group: 'reading',
+  },
+  {
+    keywords: ['game pass', 'gamepass'],
+    domain: 'xbox.com',
+    shortName: 'Xbox Game Pass',
+    brandColor: '#107C10',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['playstation plus', 'ps plus', 'ps+'],
+    domain: 'playstation.com',
+    shortName: 'PlayStation Plus',
+    brandColor: '#003791',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['nintendo switch online'],
+    domain: 'nintendo.com',
+    shortName: 'Nintendo Switch Online',
+    brandColor: '#E60012',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['rakuten tv'],
+    domain: 'rakuten.tv',
+    shortName: 'Rakuten TV',
+    brandColor: '#BF0000',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['rakuten viki', 'viki'],
+    domain: 'viki.com',
+    shortName: 'Viki',
+    brandColor: '#1E90FF',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['cinemax'],
+    domain: 'cinemax.com',
+    shortName: 'Cinemax',
+    brandColor: '#1A1A1A',
+    textColor: '#FFFFFF',
+    iconFallback: 'film',
+  },
   {
     keywords: ['netflix'],
     domain: 'netflix.com',
@@ -24,6 +157,7 @@ const BRAND_CATALOG: {
     brandColor: '#E50914',
     textColor: '#FFFFFF',
     iconFallback: 'film',
+    group: 'video',
   },
   {
     keywords: ['prime video', 'amazon prime', 'amazon video'],
@@ -32,6 +166,7 @@ const BRAND_CATALOG: {
     brandColor: '#00A8E1',
     textColor: '#0F172A',
     iconFallback: 'tv',
+    group: 'video',
   },
   {
     keywords: ['disney', 'disney+'],
@@ -40,6 +175,7 @@ const BRAND_CATALOG: {
     brandColor: '#113CCF',
     textColor: '#FFFFFF',
     iconFallback: 'sparkles',
+    group: 'video',
   },
   {
     keywords: ['max', 'hbo max', 'hbo'],
@@ -48,6 +184,7 @@ const BRAND_CATALOG: {
     brandColor: '#002BE7',
     textColor: '#FFFFFF',
     iconFallback: 'tv',
+    group: 'video',
   },
   {
     keywords: ['apple tv', 'apple tv+', 'itunes', 'apple'],
@@ -56,6 +193,7 @@ const BRAND_CATALOG: {
     brandColor: '#1C1C1E',
     textColor: '#FFFFFF',
     iconFallback: 'logo-apple',
+    group: 'video',
   },
   {
     keywords: ['paramount', 'paramount+'],
@@ -64,6 +202,7 @@ const BRAND_CATALOG: {
     brandColor: '#0064FF',
     textColor: '#FFFFFF',
     iconFallback: 'film',
+    group: 'video',
   },
   {
     keywords: ['crunchyroll'],
@@ -72,6 +211,7 @@ const BRAND_CATALOG: {
     brandColor: '#F47521',
     textColor: '#FFFFFF',
     iconFallback: 'flash',
+    group: 'video',
   },
   {
     keywords: ['mangadex'],
@@ -80,6 +220,7 @@ const BRAND_CATALOG: {
     brandColor: '#FF6740',
     textColor: '#FFFFFF',
     iconFallback: 'book',
+    group: 'reading',
   },
   {
     keywords: ['open library', 'internet archive'],
@@ -96,6 +237,7 @@ const BRAND_CATALOG: {
     brandColor: '#E67E22',
     textColor: '#FFFFFF',
     iconFallback: 'book-outline',
+    group: 'reading',
   },
   {
     keywords: ['filmin'],
@@ -104,6 +246,7 @@ const BRAND_CATALOG: {
     brandColor: '#00FF87',
     textColor: '#0F172A',
     iconFallback: 'videocam',
+    group: 'video',
   },
   {
     keywords: ['movistar', 'movistar+'],
@@ -112,6 +255,7 @@ const BRAND_CATALOG: {
     brandColor: '#0B2742',
     textColor: '#00E5FF',
     iconFallback: 'tv',
+    group: 'video',
   },
   {
     keywords: ['star+', 'star plus'],
@@ -120,6 +264,7 @@ const BRAND_CATALOG: {
     brandColor: '#FF5F00',
     textColor: '#FFFFFF',
     iconFallback: 'star',
+    group: 'video',
   },
   {
     keywords: ['pluto tv', 'pluto'],
@@ -128,6 +273,7 @@ const BRAND_CATALOG: {
     brandColor: '#FFE600',
     textColor: '#0F172A',
     iconFallback: 'tv',
+    group: 'video',
   },
   {
     keywords: ['vix'],
@@ -136,6 +282,7 @@ const BRAND_CATALOG: {
     brandColor: '#FF4500',
     textColor: '#FFFFFF',
     iconFallback: 'play',
+    group: 'video',
   },
   {
     keywords: ['youtube'],
@@ -144,6 +291,7 @@ const BRAND_CATALOG: {
     brandColor: '#FF0000',
     textColor: '#FFFFFF',
     iconFallback: 'logo-youtube',
+    group: 'video',
   },
   {
     keywords: ['google play', 'google tv'],
@@ -152,6 +300,7 @@ const BRAND_CATALOG: {
     brandColor: '#4285F4',
     textColor: '#FFFFFF',
     iconFallback: 'tv',
+    group: 'video',
   },
   {
     keywords: ['kobo', 'rakuten kobo'],
@@ -160,6 +309,7 @@ const BRAND_CATALOG: {
     brandColor: '#BF0000',
     textColor: '#FFFFFF',
     iconFallback: 'book',
+    group: 'reading',
   },
   {
     keywords: ['animeflv'],
@@ -176,6 +326,241 @@ const BRAND_CATALOG: {
     brandColor: '#00B7FF',
     textColor: '#0F172A',
     iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['skyshowtime'],
+    domain: 'skyshowtime.com',
+    shortName: 'SkyShowtime',
+    brandColor: '#0B1E3F',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['mubi'],
+    domain: 'mubi.com',
+    shortName: 'MUBI',
+    brandColor: '#001489',
+    textColor: '#FFFFFF',
+    iconFallback: 'film',
+    group: 'video',
+  },
+  {
+    keywords: ['atresplayer'],
+    domain: 'atresplayer.com',
+    shortName: 'Atresplayer',
+    brandColor: '#FF6A00',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['rtve play', 'rtve'],
+    domain: 'rtve.es',
+    shortName: 'RTVE Play',
+    brandColor: '#E4002B',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['mitele', 'mediaset'],
+    domain: 'mitele.es',
+    shortName: 'Mitele',
+    brandColor: '#00A3E0',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['flixolé', 'flixole'],
+    domain: 'flixole.com',
+    shortName: 'FlixOlé',
+    brandColor: '#E30613',
+    textColor: '#FFFFFF',
+    iconFallback: 'film',
+    group: 'video',
+  },
+  {
+    keywords: ['hulu'],
+    domain: 'hulu.com',
+    shortName: 'Hulu',
+    brandColor: '#1CE783',
+    textColor: '#0F172A',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['peacock'],
+    domain: 'peacocktv.com',
+    shortName: 'Peacock',
+    brandColor: '#000000',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['tubi'],
+    domain: 'tubitv.com',
+    shortName: 'Tubi',
+    brandColor: '#7408FF',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['plex'],
+    domain: 'plex.tv',
+    shortName: 'Plex',
+    brandColor: '#E5A00D',
+    textColor: '#0F172A',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['twitch'],
+    domain: 'twitch.tv',
+    shortName: 'Twitch',
+    brandColor: '#9146FF',
+    textColor: '#FFFFFF',
+    iconFallback: 'logo-twitch',
+    group: 'video',
+  },
+  {
+    keywords: ['claro video'],
+    domain: 'clarovideo.com',
+    shortName: 'Claro Video',
+    brandColor: '#DA291C',
+    textColor: '#FFFFFF',
+    iconFallback: 'tv',
+    group: 'video',
+  },
+  {
+    keywords: ['mercado play'],
+    domain: 'mercadolibre.com',
+    shortName: 'Mercado Play',
+    brandColor: '#FFE600',
+    textColor: '#0F172A',
+    iconFallback: 'play',
+    group: 'video',
+  },
+  {
+    keywords: ['spotify'],
+    domain: 'spotify.com',
+    shortName: 'Spotify',
+    brandColor: '#1DB954',
+    textColor: '#0F172A',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['deezer'],
+    domain: 'deezer.com',
+    shortName: 'Deezer',
+    brandColor: '#A238FF',
+    textColor: '#FFFFFF',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['tidal'],
+    domain: 'tidal.com',
+    shortName: 'Tidal',
+    brandColor: '#000000',
+    textColor: '#FFFFFF',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['soundcloud'],
+    domain: 'soundcloud.com',
+    shortName: 'SoundCloud',
+    brandColor: '#FF5500',
+    textColor: '#FFFFFF',
+    iconFallback: 'musical-notes',
+    group: 'music',
+  },
+  {
+    keywords: ['ivoox'],
+    domain: 'ivoox.com',
+    shortName: 'iVoox',
+    brandColor: '#F45A00',
+    textColor: '#FFFFFF',
+    iconFallback: 'mic',
+    group: 'music',
+  },
+  {
+    keywords: ['audible'],
+    domain: 'audible.com',
+    shortName: 'Audible',
+    brandColor: '#F8991C',
+    textColor: '#0F172A',
+    iconFallback: 'headset',
+    group: 'reading',
+  },
+  {
+    keywords: ['storytel'],
+    domain: 'storytel.com',
+    shortName: 'Storytel',
+    brandColor: '#FF501E',
+    textColor: '#FFFFFF',
+    iconFallback: 'headset',
+    group: 'reading',
+  },
+  {
+    keywords: ['scribd', 'everand'],
+    domain: 'scribd.com',
+    shortName: 'Scribd',
+    brandColor: '#1E7B85',
+    textColor: '#FFFFFF',
+    iconFallback: 'book',
+    group: 'reading',
+  },
+  {
+    keywords: ['manga plus', 'mangaplus'],
+    domain: 'mangaplus.shueisha.co.jp',
+    shortName: 'MANGA Plus',
+    brandColor: '#E60012',
+    textColor: '#FFFFFF',
+    iconFallback: 'book',
+    group: 'reading',
+  },
+  {
+    keywords: ['webtoon'],
+    domain: 'webtoons.com',
+    shortName: 'Webtoon',
+    brandColor: '#00DC64',
+    textColor: '#0F172A',
+    iconFallback: 'book',
+    group: 'reading',
+  },
+  {
+    keywords: ['ea play'],
+    domain: 'ea.com',
+    shortName: 'EA Play',
+    brandColor: '#FF4747',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['ubisoft+', 'ubisoft plus', 'ubisoft'],
+    domain: 'ubisoft.com',
+    shortName: 'Ubisoft+',
+    brandColor: '#0070FF',
+    textColor: '#FFFFFF',
+    iconFallback: 'game-controller',
+    group: 'games',
+  },
+  {
+    keywords: ['geforce now'],
+    domain: 'nvidia.com',
+    shortName: 'GeForce NOW',
+    brandColor: '#76B900',
+    textColor: '#0F172A',
+    iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['steam', 'valvesoftware'],
@@ -184,6 +569,7 @@ const BRAND_CATALOG: {
     brandColor: '#171A21',
     textColor: '#FFFFFF',
     iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['playstation', 'ps store', 'psn', 'ps4', 'ps5'],
@@ -192,6 +578,7 @@ const BRAND_CATALOG: {
     brandColor: '#003791',
     textColor: '#FFFFFF',
     iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['xbox', 'microsoft store'],
@@ -200,6 +587,7 @@ const BRAND_CATALOG: {
     brandColor: '#107C10',
     textColor: '#FFFFFF',
     iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['nintendo', 'eshop', 'switch'],
@@ -208,6 +596,7 @@ const BRAND_CATALOG: {
     brandColor: '#E60012',
     textColor: '#FFFFFF',
     iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['epic games', 'epic store'],
@@ -216,6 +605,7 @@ const BRAND_CATALOG: {
     brandColor: '#2A2A2A',
     textColor: '#FFFFFF',
     iconFallback: 'game-controller',
+    group: 'games',
   },
   {
     keywords: ['gog', 'gog.com'],
@@ -290,4 +680,41 @@ export const resolvePlatformBranding = (
     color: brand.brandColor,
     fallbackIcon: category === 'game' ? 'game-controller-outline' : brand.iconFallback,
   };
+};
+
+export interface SubscriptionPlatformOption {
+  name: string;
+  group: PlatformGroup;
+}
+
+export const PLATFORM_GROUP_LABELS: Record<PlatformGroup, string> = {
+  video: 'Cine y series',
+  music: 'Música y podcasts',
+  reading: 'Lectura y audiolibros',
+  games: 'Videojuegos',
+};
+
+/** Known platforms the user can pick as subscriptions in their profile. */
+export const SUBSCRIPTION_PLATFORMS: SubscriptionPlatformOption[] = BRAND_CATALOG.filter(
+  (entry): entry is BrandEntry & { group: PlatformGroup } => Boolean(entry.group)
+).map(entry => ({ name: entry.shortName, group: entry.group }));
+
+const findBrand = (name: string): BrandEntry | undefined => {
+  const normalized = name.toLowerCase().trim();
+  if (!normalized) return undefined;
+  return BRAND_CATALOG.find(entry => entry.keywords.some(kw => normalized.includes(kw)));
+};
+
+/** Catalog name of a platform (e.g. "HBO Max" -> "Max"), or the trimmed name if unknown. */
+export const canonicalPlatformName = (name: string): string =>
+  findBrand(name)?.shortName ?? name.trim().replace(/\s+/g, ' ');
+
+/** Whether two platform names refer to the same service. */
+export const isSamePlatform = (a: string, b: string): boolean => {
+  const brandA = findBrand(a);
+  const brandB = findBrand(b);
+  if (brandA && brandB) return brandA === brandB;
+  const x = a.toLowerCase().trim();
+  const y = b.toLowerCase().trim();
+  return Boolean(x && y) && (x.includes(y) || y.includes(x));
 };

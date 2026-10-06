@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 // react-native's SafeAreaView is iOS-only; Android draws edge-to-edge and needs real insets
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AddMediaModal } from './src/components/AddMediaModal';
+import { AppFooter } from './src/components/AppFooter';
 import { AppUpdatesModal } from './src/components/AppUpdatesModal';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
@@ -43,6 +44,7 @@ import { isItemInList, isSameWork, isWatchedIn, toWatchedEntry, toWork } from '.
 import { LIST_CONTENT_TYPES, describeAllowedCategories, getAllowedCategories, isCategoryAllowed, toListContentType } from './src/utils/listCategories';
 import { ItemSortMode, sortItems } from './src/utils/ratings';
 import { remoteImageSource } from './src/utils/remoteImage';
+import { isSamePlatform } from './src/utils/platformLogos';
 import { HomeFeed } from './src/components/HomeFeed';
 import { buildHomeFeed } from './src/services/homeFeedService';
 import {
@@ -69,6 +71,7 @@ import {
   DirectRecommendation,
   ListActivityNotification,
   MediaCategory,
+  FavoriteItem,
   MediaItem,
   UpdateInfo,
   UserProfile,
@@ -133,6 +136,11 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [directRecommendations, setDirectRecommendations] = useState<DirectRecommendation[]>([]);
   // Personal watched works of the current user (shared across all lists, private to them).
   const [watchedState, setWatchedState] = useState<{ userId: string; entries: WatchedEntry[] }>({
+    userId: '',
+    entries: [],
+  });
+  // Favorite list items of the current user (private to them).
+  const [favoritesState, setFavoritesState] = useState<{ userId: string; entries: FavoriteItem[] }>({
     userId: '',
     entries: [],
   });
@@ -217,7 +225,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   };
 
   /** Opens a list (and optionally one of its items) from the home feed, wall or a notification. */
-  const openListItem = async (listId: string, mediaId?: string | null) => {
+  const openListItem = async (listId: string, mediaId?: string | null, fallbackItem?: MediaItem) => {
     let target = lists.find(l => l.id === listId);
     if (!target) {
       const fresh = await StorageService.getLists();
@@ -231,7 +239,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     setSelectedList(target);
     setCategoryFilter('all');
     setActiveTab('lists');
-    const item = mediaId ? target.items.find(i => i.id === mediaId) : undefined;
+    // A removed item can still be shown from a saved copy (e.g. a favorite).
+    const item = (mediaId ? target.items.find(i => i.id === mediaId) : undefined) ?? fallbackItem;
     if (item) {
       setSelectedMedia(item);
       setIsDetailVisible(true);
@@ -287,6 +296,62 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       setWatchedEntries(previous);
       Alert.alert('No se pudo guardar', err instanceof Error ? err.message : 'Inténtalo de nuevo.');
     }
+  };
+
+  const favorites = useMemo(
+    () => (profileId && favoritesState.userId === profileId ? favoritesState.entries : []),
+    [profileId, favoritesState]
+  );
+  useEffect(() => {
+    const userId = profile?.id;
+    if (!userId) return;
+    let cancelled = false;
+    StorageService.getFavorites(userId).then(entries => {
+      if (!cancelled) setFavoritesState({ userId, entries });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
+
+  // List an item belongs to: the open list first, otherwise any list in the user's home.
+  const findSourceList = (item: MediaItem): CollaborativeList | undefined =>
+    selectedList?.items.some(i => i.id === item.id)
+      ? selectedList
+      : homeLists.find(l => l.items.some(i => i.id === item.id));
+
+  const isFavoriteIn = (listId: string, mediaId: string) =>
+    favorites.some(f => f.listId === listId && f.mediaId === mediaId);
+
+  const setFavorite = async (list: Pick<CollaborativeList, 'id' | 'title'>, item: MediaItem, favorite: boolean) => {
+    if (!profile) return;
+    const userId = profile.id;
+    const previous = favorites;
+    // Optimistic update; reverted if persisting fails.
+    const others = previous.filter(f => !(f.listId === list.id && f.mediaId === item.id));
+    const optimistic: FavoriteItem[] = favorite
+      ? [{ id: `fav-pending-${item.id}`, mediaId: item.id, listId: list.id, listTitle: list.title, item, addedAt: new Date().toISOString(), userId }, ...others]
+      : others;
+    setFavoritesState({ userId, entries: optimistic });
+    try {
+      setFavoritesState({ userId, entries: await StorageService.setFavorite(userId, list, item, favorite, previous) });
+    } catch (err) {
+      setFavoritesState({ userId, entries: previous });
+      Alert.alert('No se pudo guardar', err instanceof Error ? err.message : 'Inténtalo de nuevo.');
+    }
+  };
+
+  const handleToggleFavorite = (item: MediaItem) => {
+    const list = findSourceList(item);
+    if (list) setFavorite(list, item, !isFavoriteIn(list.id, item.id));
+  };
+
+  const handleRemoveFavorite = (fav: FavoriteItem) =>
+    setFavorite({ id: fav.listId, title: fav.listTitle }, fav.item, false);
+
+  const handleOpenFavorite = (fav: FavoriteItem) => {
+    setIsAuthModalVisible(false);
+    openListItem(fav.listId, fav.mediaId, fav.item);
   };
 
   const homeFeed = useMemo(
@@ -709,7 +774,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const radarItems = homeLists.flatMap(l => l.items).filter((item, index, self) => {
     const isFirst = self.findIndex(i => i.title.toLowerCase() === item.title.toLowerCase()) === index;
     const matchesUserSubs = profile?.activeSubscriptions.some(sub =>
-      item.whereToWatchOrRead.some(p => p.name.toLowerCase().includes(sub.toLowerCase()))
+      (item.whereToWatchOrRead ?? []).some(p => isSamePlatform(sub, p.name))
     );
     return isFirst && matchesUserSubs;
   });
@@ -1186,6 +1251,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
                 isSaving={savingItemIds.includes(item.id)}
                 isWatched={isWatchedByMe(item)}
                 onToggleWatched={handleToggleWatched}
+                isFavorite={!!selectedList && isFavoriteIn(selectedList.id, item.id)}
+                onToggleFavorite={handleToggleFavorite}
               />
             )}
             ListEmptyComponent={
@@ -1232,7 +1299,9 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           <View style={styles.radarHeader}>
             <Text style={styles.radarTitle}>📡 Radar de Streaming Compartido</Text>
             <Text style={styles.radarSubtitle}>
-              Obras recomendadas por amigos disponibles en tus suscripciones ({profile?.activeSubscriptions.join(', ')}).
+              {profile?.activeSubscriptions.length
+                ? `Obras de tus listas disponibles en tus plataformas (${profile.activeSubscriptions.join(', ')}).`
+                : 'Configura en tu perfil las plataformas que tienes para ver qué obras de tus listas puedes ver ya.'}
             </Text>
           </View>
 
@@ -1252,10 +1321,20 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             ListEmptyComponent={
               <View style={styles.emptyItemsView}>
                 <Ionicons name="radio-outline" size={54} color="#334155" />
-                <Text style={styles.emptyTitle}>No hay obras en tus suscripciones</Text>
-                <Text style={styles.emptySubtitle}>
-                  Agrega más servicios en tu perfil o añade nuevas películas y libros a tus listas.
+                <Text style={styles.emptyTitle}>
+                  {profile?.activeSubscriptions.length ? 'No hay obras en tus plataformas' : 'Aún no tienes plataformas'}
                 </Text>
+                <Text style={styles.emptySubtitle}>
+                  Agrega más plataformas en tu perfil o añade nuevas películas y libros a tus listas.
+                </Text>
+                <TouchableOpacity
+                  style={styles.radarConfigBtn}
+                  onPress={() => setIsAuthModalVisible(true)}
+                  accessibilityLabel="Configurar plataformas"
+                >
+                  <Ionicons name="tv-outline" size={16} color="#0F172A" />
+                  <Text style={styles.radarConfigBtnText}>Configurar plataformas</Text>
+                </TouchableOpacity>
               </View>
             }
           />
@@ -1328,6 +1407,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
         </>
       )}
 
+      <AppFooter />
+
       {/* Modals */}
       <AuthModal
         visible={isAuthModalVisible}
@@ -1343,6 +1424,9 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
         }}
         onOpenSearchUsers={() => setIsUserSearchVisible(true)}
         onOpenUpdates={() => setIsUpdatesVisible(true)}
+        favorites={favorites}
+        onSelectFavoriteItem={handleOpenFavorite}
+        onRemoveFavorite={handleRemoveFavorite}
       />
       <AppUpdatesModal
         visible={isUpdatesVisible}
@@ -1381,6 +1465,11 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           currentUser={{ id: profile.id, name: profile.name, avatar: profile.avatar || '' }}
           isWatched={isWatchedByMe(selectedMedia)}
           onToggleWatched={handleToggleWatched}
+          isFavorite={(() => {
+            const sourceList = findSourceList(selectedMedia);
+            return !!sourceList && isFavoriteIn(sourceList.id, selectedMedia.id);
+          })()}
+          onToggleFavorite={findSourceList(selectedMedia) ? handleToggleFavorite : undefined}
         />
       )}
 
@@ -2016,6 +2105,21 @@ const styles = StyleSheet.create({
     padding: 18,
     borderBottomWidth: 1,
     borderBottomColor: '#1E293B',
+  },
+  radarConfigBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 16,
+    backgroundColor: '#38BDF8',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  radarConfigBtnText: {
+    color: '#0F172A',
+    fontWeight: '700',
+    fontSize: 14,
   },
   radarTitle: {
     fontSize: 17,

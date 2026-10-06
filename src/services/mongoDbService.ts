@@ -304,9 +304,9 @@ export const MongoDbService = {
   // FAVORITES
   // ==========================================
 
-  async getFavorites(userId?: string): Promise<FavoriteItem[] | null> {
-    const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-    const res = await this.request<{ documents: FavoriteItem[] }>(`/api/favorites${query}`);
+  /** Favorites of the authenticated user (the backend scopes them by session). */
+  async getFavorites(): Promise<FavoriteItem[] | null> {
+    const res = await this.request<{ documents: FavoriteItem[] }>('/api/favorites');
     return res?.documents || null;
   },
 
@@ -318,10 +318,10 @@ export const MongoDbService = {
     return Boolean(res?.success);
   },
 
-  async removeFavorite(mediaId: string, listId?: string, userId?: string): Promise<boolean> {
+  async removeFavorite(mediaId: string, listId?: string): Promise<boolean> {
     const res = await this.request<{ success: boolean }>('/api/favorites', {
       method: 'DELETE',
-      body: { mediaId, listId, userId },
+      body: { mediaId, listId },
     });
     return Boolean(res?.success);
   },

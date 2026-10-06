@@ -20,6 +20,8 @@ import { completeClerkLogin, isClerkSessionExistsError } from '../services/clerk
 import { ConfirmModal } from './ConfirmModal';
 import { UserAvatar } from './UserAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
+import { PlatformSubscriptionsEditor } from './PlatformSubscriptionsEditor';
+import { ProviderBadge } from './ProviderBadge';
 import { UpdateService } from '../services/updateService';
 import { remoteImageSource } from '../utils/remoteImage';
 
@@ -52,8 +54,8 @@ interface AuthModalProps {
   onOpenSearchUsers?: () => void;
   onProfileUpdated?: (user: UserProfile) => void;
   favorites?: FavoriteItem[];
-  onSelectFavoriteItem?: (item: MediaItem) => void;
-  onRemoveFavorite?: (item: MediaItem) => void;
+  onSelectFavoriteItem?: (favorite: FavoriteItem) => void;
+  onRemoveFavorite?: (favorite: FavoriteItem) => void;
   onOpenUpdates?: () => void;
   initialMode?: 'signin' | 'signup';
 }
@@ -149,6 +151,7 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isAvatarPickerVisible, setIsAvatarPickerVisible] = useState(false);
+  const [isEditingPlatforms, setIsEditingPlatforms] = useState(false);
 
   const [friendsList, setFriendsList] = useState<UserProfile[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -588,6 +591,17 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
     }
   };
 
+  const handleUpdatePlatforms = async (platforms: string[]) => {
+    if (!currentUser) return;
+    const updated: UserProfile = { ...currentUser, activeSubscriptions: platforms };
+    onLoginSuccess(updated);
+    try {
+      await StorageService.updateProfile(updated);
+    } catch (err) {
+      console.warn('Error persisting platforms:', err);
+    }
+  };
+
   const handleLogoutPress = () => {
     setShowLogoutConfirm(true);
   };
@@ -720,6 +734,45 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                   <Text style={styles.userBioText}>{currentUser.bio}</Text>
                 )}
 
+                {/* Platforms Section */}
+                <View style={styles.favoritesSection}>
+                  <View style={styles.favoritesHeaderRow}>
+                    <View style={styles.favoritesHeaderTitleRow}>
+                      <Ionicons name="tv" size={17} color="#38BDF8" />
+                      <Text style={styles.favoritesTitle}>Mis Plataformas</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.findFriendsHeaderBtn}
+                      onPress={() => setIsEditingPlatforms(prev => !prev)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name={isEditingPlatforms ? 'checkmark' : 'create-outline'} size={14} color="#38BDF8" />
+                      <Text style={styles.findFriendsHeaderBtnText}>{isEditingPlatforms ? 'Listo' : 'Editar'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.platformsHint}>
+                    El Radar usa estas plataformas para mostrarte qué obras de tus listas puedes ver ya.
+                  </Text>
+                  {isEditingPlatforms ? (
+                    <PlatformSubscriptionsEditor
+                      value={currentUser.activeSubscriptions ?? []}
+                      onChange={handleUpdatePlatforms}
+                    />
+                  ) : (currentUser.activeSubscriptions ?? []).length === 0 ? (
+                    <TouchableOpacity onPress={() => setIsEditingPlatforms(true)} activeOpacity={0.8}>
+                      <Text style={styles.emptyFavoritesText}>
+                        Aún no has añadido plataformas. Toca «Editar» para elegir las que tienes.
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.platformsRow}>
+                      {currentUser.activeSubscriptions.map(sub => (
+                        <ProviderBadge key={sub} provider={{ id: sub, name: sub, type: 'stream' }} compact />
+                      ))}
+                    </View>
+                  )}
+                </View>
+
                 {/* Favorites Section */}
                 <View style={styles.favoritesSection}>
                   <View style={styles.favoritesHeaderRow}>
@@ -751,7 +804,7 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                           style={styles.favoriteCard}
                           onPress={() => {
                             onClose?.();
-                            onSelectFavoriteItem?.(fav.item);
+                            onSelectFavoriteItem?.(fav);
                           }}
                           activeOpacity={0.8}
                         >
@@ -776,7 +829,7 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                               style={styles.removeFavMiniBtn}
                               onPress={(e) => {
                                 e.stopPropagation?.();
-                                onRemoveFavorite(fav.item);
+                                onRemoveFavorite(fav);
                               }}
                               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
@@ -1491,6 +1544,16 @@ const styles = StyleSheet.create({
     color: '#0A84FF',
     fontSize: 15,
     fontWeight: '500',
+  },
+  platformsHint: {
+    fontSize: 12,
+    color: '#94A3B8',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  platformsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   favoritesSection: {
     marginTop: 18,

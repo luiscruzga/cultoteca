@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ProviderBadge } from './ProviderBadge';
 import { Ionicons } from '@expo/vector-icons';
 import { Badge, UserProfile } from '../types';
 import { GamificationService } from '../services/gamificationService';
@@ -127,12 +128,13 @@ export const BadgesModal: React.FC<BadgesModalProps> = ({ visible, onClose, prof
             Utilizados por el Radar de Streaming para saber qué contenidos puedes ver de inmediato con amigos.
           </Text>
           <View style={styles.subscriptionsRow}>
-            {profile.activeSubscriptions.map((sub, idx) => (
-              <View key={idx} style={styles.subBadge}>
-                <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-                <Text style={styles.subText}>{sub}</Text>
-              </View>
-            ))}
+            {profile.activeSubscriptions.length === 0 ? (
+              <Text style={styles.sectionDesc}>Configura tus plataformas desde tu perfil.</Text>
+            ) : (
+              profile.activeSubscriptions.map(sub => (
+                <ProviderBadge key={sub} provider={{ id: sub, name: sub, type: 'stream' }} compact />
+              ))
+            )}
           </View>
 
           {/* Badges List */}
@@ -380,22 +382,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 24,
-  },
-  subBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-    gap: 6,
-  },
-  subText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#F8FAFC',
   },
   badgesGrid: {
     gap: 12,

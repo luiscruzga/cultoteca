@@ -982,99 +982,61 @@ export const StorageService = {
     return updated;
   },
 
-  async getFavorites(userId?: string): Promise<FavoriteItem[]> {
+  /** Favorites of a user, cached locally per user. */
+  async getFavorites(userId: string): Promise<FavoriteItem[]> {
+    const cacheKey = `${FAVORITES_KEY}:${userId}`;
     try {
-      if (MongoDbService.isConfigured()) {
-        const remoteFavs = await MongoDbService.getFavorites(userId);
+      if (await MongoDbService.hasSession()) {
+        const remoteFavs = await MongoDbService.getFavorites();
         if (remoteFavs) {
-          await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(remoteFavs));
+          await AsyncStorage.setItem(cacheKey, JSON.stringify(remoteFavs));
           return remoteFavs;
         }
       }
-      const data = await AsyncStorage.getItem(FAVORITES_KEY);
-      if (data) {
-        const parsed: FavoriteItem[] = JSON.parse(data);
-        if (userId) {
-          return parsed.filter(f => !f.userId || f.userId === userId);
-        }
-        return parsed;
-      }
-      return [];
+      const data = await AsyncStorage.getItem(cacheKey);
+      return data ? (JSON.parse(data) as FavoriteItem[]) : [];
     } catch {
       return [];
     }
   },
 
-  async toggleFavorite(
-    list: CollaborativeList,
+  /** Marks or unmarks a list item as favorite; throws if the backend rejects the change. */
+  async setFavorite(
+    userId: string,
+    list: Pick<CollaborativeList, 'id' | 'title'>,
     item: MediaItem,
-    userId?: string
-  ): Promise<{ isFavorite: boolean; favorites: FavoriteItem[] }> {
-    try {
-      const allFavorites = await this.getFavorites();
-      const existingIndex = allFavorites.findIndex(
-        f => f.mediaId === item.id && (f.listId === list.id || !f.listId)
-      );
+    favorite: boolean,
+    current: FavoriteItem[]
+  ): Promise<FavoriteItem[]> {
+    const others = current.filter(f => !(f.mediaId === item.id && f.listId === list.id));
+    const entry: FavoriteItem = {
+      id: `fav-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      mediaId: item.id,
+      listId: list.id,
+      listTitle: list.title,
+      item,
+      addedAt: new Date().toISOString(),
+      userId,
+    };
+    const updated = favorite ? [entry, ...others] : others;
 
-      let isFavorite = false;
-      let updated: FavoriteItem[];
-
-      if (existingIndex >= 0) {
-        updated = allFavorites.filter((_, idx) => idx !== existingIndex);
-        isFavorite = false;
-
-        if (MongoDbService.isConfigured()) {
-          await MongoDbService.removeFavorite(item.id, list.id, userId);
-          await MongoDbService.logAction({
-            userId: userId || 'anonymous',
-            actionType: 'remove_favorite',
-            targetTitle: item.title,
-            targetId: item.id,
-            listTitle: list.title,
-            details: `Eliminó de favoritos: "${item.title}"`,
-          });
-        }
-      } else {
-        const newFavorite: FavoriteItem = {
-          id: `fav-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          mediaId: item.id,
-          listId: list.id,
-          listTitle: list.title,
-          item,
-          addedAt: new Date().toISOString(),
-          userId,
-        };
-        updated = [newFavorite, ...allFavorites];
-        isFavorite = true;
-
-        if (MongoDbService.isConfigured()) {
-          await MongoDbService.insertFavorite(newFavorite);
-          await MongoDbService.logAction({
-            userId: userId || 'anonymous',
-            actionType: 'add_favorite',
-            targetTitle: item.title,
-            targetId: item.id,
-            listTitle: list.title,
-            details: `Guardó como favorito: "${item.title}"`,
-          });
-        }
-      }
-
-      await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(updated));
-      return { isFavorite, favorites: updated };
-    } catch (e) {
-      console.warn('Error toggling favorite:', e);
-      return { isFavorite: false, favorites: [] };
+    if (await MongoDbService.hasSession()) {
+      const ok = favorite
+        ? await MongoDbService.insertFavorite(entry)
+        : await MongoDbService.removeFavorite(item.id, list.id);
+      if (!ok) throw new Error('No se pudo guardar el favorito.');
+      MongoDbService.logAction({
+        userId,
+        actionType: favorite ? 'add_favorite' : 'remove_favorite',
+        targetTitle: item.title,
+        targetId: item.id,
+        listTitle: list.title,
+        details: favorite ? `Guardó como favorito: "${item.title}"` : `Eliminó de favoritos: "${item.title}"`,
+      }).catch(() => undefined);
     }
-  },
 
-  async isItemFavorite(mediaId: string, listId?: string): Promise<boolean> {
-    try {
-      const allFavorites = await this.getFavorites();
-      return allFavorites.some(f => f.mediaId === mediaId && (!listId || f.listId === listId));
-    } catch {
-      return false;
-    }
+    await AsyncStorage.setItem(`${FAVORITES_KEY}:${userId}`, JSON.stringify(updated));
+    return updated;
   },
 
   async getDirectRecommendations(userId?: string): Promise<DirectRecommendation[]> {

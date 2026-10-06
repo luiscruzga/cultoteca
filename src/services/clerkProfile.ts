@@ -54,9 +54,8 @@ export async function buildProfileFromClerkSession(input: {
     userCode: existing?.userCode || generateUserCode(),
     cultoScore: existing?.cultoScore ?? 100,
     badges: existing?.badges || [],
-    activeSubscriptions: existing?.activeSubscriptions?.length
-      ? existing.activeSubscriptions
-      : ['Netflix'],
+    // An explicitly emptied selection is kept; 'Netflix' only seeds new profiles.
+    activeSubscriptions: existing?.activeSubscriptions ?? ['Netflix'],
   };
 }
 
