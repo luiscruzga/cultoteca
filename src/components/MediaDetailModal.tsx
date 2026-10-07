@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CastMember, MediaItem } from '../types';
+import { CastMember, MediaItem, StreamingProvider } from '../types';
 import { MarkdownText } from './MarkdownText';
 import { ProviderBadge } from './ProviderBadge';
 import { RatingStars } from './RatingStars';
@@ -21,6 +21,7 @@ import { PersonDetailModal } from './PersonDetailModal';
 import { ImageViewerModal } from './ImageViewerModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { getCriticRating, getListRating } from '../utils/ratings';
+import { resolveDestination, resolveProviderLinks } from '../services/api/providerLinksService';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -97,8 +98,24 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<CastMember | null>(null);
   const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
+  // Proveedores con enlaces directos resueltos al abrir el detalle; solo en memoria, no se guardan en la lista.
+  const [resolvedProviders, setResolvedProviders] = useState<{ itemId: string; providers: StreamingProvider[] } | null>(null);
+
+  useEffect(() => {
+    if (!item || !visible) return;
+    const controller = new AbortController();
+    resolveProviderLinks(item, controller.signal).then(resolved => {
+      if (!controller.signal.aborted && resolved !== item) {
+        setResolvedProviders({ itemId: item.id, providers: resolved.whereToWatchOrRead });
+      }
+    });
+    return () => controller.abort();
+  }, [item, visible]);
 
   if (!item || !visible) return null;
+
+  const providers =
+    resolvedProviders?.itemId === item.id ? resolvedProviders.providers : item.whereToWatchOrRead || [];
 
   const criticRating = getCriticRating(item);
   const listRating = getListRating(item);
@@ -612,7 +629,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           )}
 
           {/* Where to watch / read / play */}
-          {item.whereToWatchOrRead && item.whereToWatchOrRead.length > 0 && (
+          {providers.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
                 {item.category === 'book' || item.category === 'manga'
@@ -628,9 +645,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   : '📺 Dónde Verlo en Streaming'}
               </Text>
               <View style={styles.providersContainer}>
-                {item.whereToWatchOrRead.map(provider => (
-                  <ProviderBadge key={provider.id} provider={provider} category={item.category} />
-                ))}
+                {providers.map(provider => {
+                  const destination = resolveDestination(provider, item);
+                  return (
+                    <ProviderBadge
+                      key={provider.id}
+                      provider={provider}
+                      category={item.category}
+                      onPress={destination ? () => openUrl(destination) : undefined}
+                    />
+                  );
+                })}
               </View>
             </View>
           )}

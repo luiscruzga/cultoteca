@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, View, StyleProp, ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StreamingProvider } from '../types';
 import { resolvePlatformBranding } from '../utils/platformLogos';
@@ -10,6 +10,8 @@ interface ProviderBadgeProps {
   category?: string;
   style?: StyleProp<ViewStyle>;
   hideText?: boolean;
+  /** Only used in full mode: makes the badge open the provider destination. */
+  onPress?: () => void;
 }
 
 export const ProviderBadge: React.FC<ProviderBadgeProps> = ({
@@ -18,6 +20,7 @@ export const ProviderBadge: React.FC<ProviderBadgeProps> = ({
   category,
   style,
   hideText = false,
+  onPress,
 }) => {
   const [imageError, setImageError] = useState(false);
 
@@ -83,13 +86,17 @@ export const ProviderBadge: React.FC<ProviderBadgeProps> = ({
   }
 
   // Modo Estándar / Detalle (MediaDetailModal)
+  const Container = onPress ? TouchableOpacity : View;
   return (
-    <View
+    <Container
       style={[
         styles.fullContainer,
         { borderColor: branding.color ? `${branding.color}66` : '#334155' },
         style,
       ]}
+      {...(onPress
+        ? { onPress, activeOpacity: 0.7, accessibilityRole: 'link' as const, accessibilityLabel: `Abrir en ${branding.name}` }
+        : {})}
     >
       {hasValidLogo ? (
         <Image
@@ -121,7 +128,9 @@ export const ProviderBadge: React.FC<ProviderBadgeProps> = ({
           {getTypeLabel(provider.type)}
         </Text>
       </View>
-    </View>
+
+      {onPress && <Ionicons name="open-outline" size={14} color="#94A3B8" style={styles.fullOpenIcon} />}
+    </Container>
   );
 };
 
@@ -190,6 +199,9 @@ const styles = StyleSheet.create({
   },
   fullInfoContainer: {
     justifyContent: 'center',
+  },
+  fullOpenIcon: {
+    marginLeft: 8,
   },
   fullTitle: {
     fontSize: 13,

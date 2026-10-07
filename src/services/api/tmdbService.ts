@@ -72,13 +72,16 @@ interface TmdbWatchProvidersResult {
   buy?: TmdbWatchProviderItem[];
 }
 
+/** Regiones de disponibilidad en orden de preferencia (TMDB y enlaces directos). */
+export const PREFERRED_REGIONS = ['CL', 'ES', 'MX', 'AR', 'US'];
+
 /**
  * Consulta proveedores de streaming de JustWatch mediante TMDB /watch/providers
  */
 export const fetchTmdbWatchProviders = async (
   id: number,
   type: 'movie' | 'tv',
-  preferredRegions: string[] = ['CL', 'ES', 'MX', 'AR', 'US'],
+  preferredRegions: string[] = PREFERRED_REGIONS,
   signal?: AbortSignal
 ): Promise<{ providers: StreamingProvider[]; justWatchLink?: string }> => {
   const apiKey = getApiKey();

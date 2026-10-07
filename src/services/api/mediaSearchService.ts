@@ -677,22 +677,8 @@ const searchJikanAnime = async (cleanQuery: string, signal?: AbortSignal): Promi
       genres: item.genres?.map((g: any) => g.name) || ['Anime'],
       averageRating: item.score ? Math.round((item.score / 2) * 10) / 10 : 4.5,
       ratingsCount: item.scored_by || 15,
-      whereToWatchOrRead: [
-        {
-          id: 'p-crunchyroll',
-          name: 'Crunchyroll',
-          type: 'stream',
-          color: '#F47521',
-          logoUrl: 'https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://crunchyroll.com&size=128',
-        },
-        {
-          id: 'p-netflix',
-          name: 'Netflix',
-          type: 'stream',
-          color: '#E50914',
-          logoUrl: 'https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://netflix.com&size=128',
-        }
-      ],
+      // Las plataformas reales se piden a /anime/{id}/streaming al abrir el detalle
+      whereToWatchOrRead: [],
       externalLinks: [
         { label: 'MyAnimeList', url: item.url }
       ],

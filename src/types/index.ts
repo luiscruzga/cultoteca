@@ -28,6 +28,8 @@ export interface StreamingProvider {
   type: 'stream' | 'buy' | 'rent' | 'read' | 'borrow';
   logoUrl?: string;
   url?: string;
+  /** 'direct' = page of this title on the platform; 'search' = title search inside the platform. */
+  linkKind?: 'direct' | 'search';
   color?: string;
 }
 

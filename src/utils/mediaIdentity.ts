@@ -26,7 +26,7 @@ export const isSameWork = (a: WorkLike, b: WorkLike): boolean => {
 };
 
 /** Provider id of an item: the stored sourceId, or the id itself for unsaved search results. */
-const providerId = (item: MediaItem): string | undefined =>
+export const providerId = (item: MediaItem): string | undefined =>
   item.sourceId ?? (/^(item|manual|link)-/.test(item.id) ? undefined : item.id);
 
 /** Work identity used for comparisons; search results carry the provider id as their own id. */

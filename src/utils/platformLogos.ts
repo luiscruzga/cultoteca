@@ -14,6 +14,8 @@ export interface PlatformBrandInfo {
 interface BrandEntry {
   keywords: string[];
   domain: string;
+  /** Title search inside the platform; `{q}` is replaced by the URL-encoded query. */
+  searchUrlTemplate?: string;
   shortName: string;
   brandColor: string;
   textColor: string;
@@ -28,6 +30,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['google play books', 'google play libros'],
     domain: 'play.google.com',
+    searchUrlTemplate: 'https://play.google.com/store/search?q={q}&c=books',
     shortName: 'Google Play Books',
     brandColor: '#4285F4',
     textColor: '#FFFFFF',
@@ -37,6 +40,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['apple music'],
     domain: 'music.apple.com',
+    searchUrlTemplate: 'https://music.apple.com/search?term={q}',
     shortName: 'Apple Music',
     brandColor: '#FA243C',
     textColor: '#FFFFFF',
@@ -64,6 +68,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['amazon music'],
     domain: 'music.amazon.com',
+    searchUrlTemplate: 'https://music.amazon.com/search/{q}',
     shortName: 'Amazon Music',
     brandColor: '#25D1DA',
     textColor: '#0F172A',
@@ -73,6 +78,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['youtube music'],
     domain: 'music.youtube.com',
+    searchUrlTemplate: 'https://music.youtube.com/search?q={q}',
     shortName: 'YouTube Music',
     brandColor: '#FF0000',
     textColor: '#FFFFFF',
@@ -91,6 +97,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['kindle unlimited'],
     domain: 'amazon.com',
+    searchUrlTemplate: 'https://www.amazon.com/s?k={q}&i=digital-text',
     shortName: 'Kindle Unlimited',
     brandColor: '#E67E22',
     textColor: '#FFFFFF',
@@ -153,6 +160,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['netflix'],
     domain: 'netflix.com',
+    searchUrlTemplate: 'https://www.netflix.com/search?q={q}',
     shortName: 'Netflix',
     brandColor: '#E50914',
     textColor: '#FFFFFF',
@@ -162,6 +170,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['prime video', 'amazon prime', 'amazon video'],
     domain: 'primevideo.com',
+    searchUrlTemplate: 'https://www.primevideo.com/search?phrase={q}',
     shortName: 'Prime Video',
     brandColor: '#00A8E1',
     textColor: '#0F172A',
@@ -171,6 +180,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['disney', 'disney+'],
     domain: 'disneyplus.com',
+    searchUrlTemplate: 'https://www.disneyplus.com/search?q={q}',
     shortName: 'Disney+',
     brandColor: '#113CCF',
     textColor: '#FFFFFF',
@@ -180,6 +190,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['max', 'hbo max', 'hbo'],
     domain: 'max.com',
+    searchUrlTemplate: 'https://play.max.com/search?q={q}',
     shortName: 'Max',
     brandColor: '#002BE7',
     textColor: '#FFFFFF',
@@ -189,6 +200,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['apple tv', 'apple tv+', 'itunes', 'apple'],
     domain: 'apple.com',
+    searchUrlTemplate: 'https://tv.apple.com/search?term={q}',
     shortName: 'Apple TV+',
     brandColor: '#1C1C1E',
     textColor: '#FFFFFF',
@@ -198,6 +210,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['paramount', 'paramount+'],
     domain: 'paramountplus.com',
+    searchUrlTemplate: 'https://www.paramountplus.com/search/?q={q}',
     shortName: 'Paramount+',
     brandColor: '#0064FF',
     textColor: '#FFFFFF',
@@ -207,6 +220,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['crunchyroll'],
     domain: 'crunchyroll.com',
+    searchUrlTemplate: 'https://www.crunchyroll.com/search?q={q}',
     shortName: 'Crunchyroll',
     brandColor: '#F47521',
     textColor: '#FFFFFF',
@@ -216,6 +230,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['mangadex'],
     domain: 'mangadex.org',
+    searchUrlTemplate: 'https://mangadex.org/search?q={q}',
     shortName: 'MangaDex',
     brandColor: '#FF6740',
     textColor: '#FFFFFF',
@@ -225,6 +240,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['open library', 'internet archive'],
     domain: 'openlibrary.org',
+    searchUrlTemplate: 'https://openlibrary.org/search?q={q}',
     shortName: 'Open Library',
     brandColor: '#006699',
     textColor: '#FFFFFF',
@@ -233,6 +249,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['kindle', 'amazon kindle'],
     domain: 'amazon.com',
+    searchUrlTemplate: 'https://www.amazon.com/s?k={q}&i=digital-text',
     shortName: 'Kindle',
     brandColor: '#E67E22',
     textColor: '#FFFFFF',
@@ -242,6 +259,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['filmin'],
     domain: 'filmin.es',
+    searchUrlTemplate: 'https://www.filmin.es/buscador?q={q}',
     shortName: 'Filmin',
     brandColor: '#00FF87',
     textColor: '#0F172A',
@@ -287,6 +305,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['youtube'],
     domain: 'youtube.com',
+    searchUrlTemplate: 'https://www.youtube.com/results?search_query={q}',
     shortName: 'YouTube',
     brandColor: '#FF0000',
     textColor: '#FFFFFF',
@@ -296,6 +315,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['google play', 'google tv'],
     domain: 'tv.google',
+    searchUrlTemplate: 'https://play.google.com/store/search?q={q}&c=movies',
     shortName: 'Google TV',
     brandColor: '#4285F4',
     textColor: '#FFFFFF',
@@ -305,6 +325,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['kobo', 'rakuten kobo'],
     domain: 'kobo.com',
+    searchUrlTemplate: 'https://www.kobo.com/search?query={q}',
     shortName: 'Kobo',
     brandColor: '#BF0000',
     textColor: '#FFFFFF',
@@ -340,6 +361,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['mubi'],
     domain: 'mubi.com',
+    searchUrlTemplate: 'https://mubi.com/search/films?query={q}',
     shortName: 'MUBI',
     brandColor: '#001489',
     textColor: '#FFFFFF',
@@ -385,6 +407,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['hulu'],
     domain: 'hulu.com',
+    searchUrlTemplate: 'https://www.hulu.com/search?q={q}',
     shortName: 'Hulu',
     brandColor: '#1CE783',
     textColor: '#0F172A',
@@ -403,6 +426,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['tubi'],
     domain: 'tubitv.com',
+    searchUrlTemplate: 'https://tubitv.com/search/{q}',
     shortName: 'Tubi',
     brandColor: '#7408FF',
     textColor: '#FFFFFF',
@@ -448,6 +472,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['spotify'],
     domain: 'spotify.com',
+    searchUrlTemplate: 'https://open.spotify.com/search/{q}',
     shortName: 'Spotify',
     brandColor: '#1DB954',
     textColor: '#0F172A',
@@ -457,6 +482,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['deezer'],
     domain: 'deezer.com',
+    searchUrlTemplate: 'https://www.deezer.com/search/{q}',
     shortName: 'Deezer',
     brandColor: '#A238FF',
     textColor: '#FFFFFF',
@@ -466,6 +492,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['tidal'],
     domain: 'tidal.com',
+    searchUrlTemplate: 'https://listen.tidal.com/search?q={q}',
     shortName: 'Tidal',
     brandColor: '#000000',
     textColor: '#FFFFFF',
@@ -475,6 +502,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['soundcloud'],
     domain: 'soundcloud.com',
+    searchUrlTemplate: 'https://soundcloud.com/search?q={q}',
     shortName: 'SoundCloud',
     brandColor: '#FF5500',
     textColor: '#FFFFFF',
@@ -493,6 +521,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['audible'],
     domain: 'audible.com',
+    searchUrlTemplate: 'https://www.audible.com/search?keywords={q}',
     shortName: 'Audible',
     brandColor: '#F8991C',
     textColor: '#0F172A',
@@ -511,6 +540,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['scribd', 'everand'],
     domain: 'scribd.com',
+    searchUrlTemplate: 'https://www.scribd.com/search?query={q}',
     shortName: 'Scribd',
     brandColor: '#1E7B85',
     textColor: '#FFFFFF',
@@ -529,6 +559,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['webtoon'],
     domain: 'webtoons.com',
+    searchUrlTemplate: 'https://www.webtoons.com/en/search?keyword={q}',
     shortName: 'Webtoon',
     brandColor: '#00DC64',
     textColor: '#0F172A',
@@ -565,6 +596,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['steam', 'valvesoftware'],
     domain: 'store.steampowered.com',
+    searchUrlTemplate: 'https://store.steampowered.com/search/?term={q}',
     shortName: 'Steam',
     brandColor: '#171A21',
     textColor: '#FFFFFF',
@@ -574,6 +606,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['playstation', 'ps store', 'psn', 'ps4', 'ps5'],
     domain: 'store.playstation.com',
+    searchUrlTemplate: 'https://store.playstation.com/search/{q}',
     shortName: 'PlayStation',
     brandColor: '#003791',
     textColor: '#FFFFFF',
@@ -583,6 +616,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['xbox', 'microsoft store'],
     domain: 'xbox.com',
+    searchUrlTemplate: 'https://www.xbox.com/search?q={q}',
     shortName: 'Xbox',
     brandColor: '#107C10',
     textColor: '#FFFFFF',
@@ -592,6 +626,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['nintendo', 'eshop', 'switch'],
     domain: 'nintendo.com',
+    searchUrlTemplate: 'https://www.nintendo.com/us/search/?q={q}',
     shortName: 'Nintendo',
     brandColor: '#E60012',
     textColor: '#FFFFFF',
@@ -601,6 +636,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['epic games', 'epic store'],
     domain: 'store.epicgames.com',
+    searchUrlTemplate: 'https://store.epicgames.com/browse?q={q}',
     shortName: 'Epic Games',
     brandColor: '#2A2A2A',
     textColor: '#FFFFFF',
@@ -610,6 +646,7 @@ const BRAND_CATALOG: BrandEntry[] = [
   {
     keywords: ['gog', 'gog.com'],
     domain: 'gog.com',
+    searchUrlTemplate: 'https://www.gog.com/games?query={q}',
     shortName: 'GOG',
     brandColor: '#8A2BE2',
     textColor: '#FFFFFF',
@@ -717,4 +754,12 @@ export const isSamePlatform = (a: string, b: string): boolean => {
   const x = a.toLowerCase().trim();
   const y = b.toLowerCase().trim();
   return Boolean(x && y) && (x.includes(y) || y.includes(x));
+};
+
+/** URL that searches `query` inside the platform, or undefined when the platform has no known search page. */
+export const getPlatformSearchUrl = (name: string, query: string): string | undefined => {
+  const template = findBrand(name)?.searchUrlTemplate;
+  const trimmed = query.trim();
+  if (!template || !trimmed) return undefined;
+  return template.replace('{q}', encodeURIComponent(trimmed));
 };

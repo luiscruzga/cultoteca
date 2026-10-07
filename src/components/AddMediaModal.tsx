@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { MIN_SEARCH_QUERY_LENGTH, searchMedia } from '../services/api/mediaSearchService';
 import { isAbortError } from '../services/api/requestController';
 import { enrichTmdbItem, isTmdbSearchItem } from '../services/api/tmdbService';
+import { resolveProviderLinks } from '../services/api/providerLinksService';
 import {
   buildLinkMediaItem,
   fetchLinkPreview,
@@ -46,6 +47,7 @@ interface AddMediaModalProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 2000;
+const PROVIDER_LINKS_TIMEOUT_MS = 3000;
 
 const CATEGORIES: { key: MediaCategory; label: string; icon: string }[] = [
   { key: 'movie', label: 'Película', icon: 'film' },
@@ -198,16 +200,15 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     setPreviewItem(null);
   };
 
-  // Antes de añadir o recomendar, completa los datos de TMDB para no guardar el item incompleto
+  // Antes de añadir o recomendar, completa los datos de TMDB y los enlaces directos de cada
+  // plataforma para no guardar el item incompleto; si los enlaces tardan, se guarda sin ellos.
   const withFullDetails = async (item: MediaItem, action: (full: MediaItem) => void) => {
-    if (!isTmdbSearchItem(item)) {
-      action(item);
-      return;
-    }
     if (pendingItemId) return;
     setPendingItemId(item.id);
     try {
-      action(await enrichTmdbItem(item));
+      const detailed = isTmdbSearchItem(item) ? await enrichTmdbItem(item) : item;
+      const timeout = new Promise<MediaItem>(resolve => setTimeout(() => resolve(detailed), PROVIDER_LINKS_TIMEOUT_MS));
+      action(await Promise.race([resolveProviderLinks(detailed), timeout]));
     } finally {
       setPendingItemId(null);
     }

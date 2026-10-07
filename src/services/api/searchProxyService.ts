@@ -22,11 +22,11 @@ const PROXY_TIMEOUT_MS = 6000;
  * el abort y un timeout propio para no retener una búsqueda obsoleta; la petición en vuelo
  * expira por su propio timeout.
  */
-export const requestViaProxy = async <T>(
+export const requestBackend = async <R>(
   path: string,
   signal?: AbortSignal,
   timeoutMs: number = PROXY_TIMEOUT_MS
-): Promise<SearchProxyResponse<T> | null> => {
+): Promise<R | null> => {
   if (signal?.aborted) return null;
 
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -38,12 +38,18 @@ export const requestViaProxy = async <T>(
   });
 
   try {
-    return await Promise.race([MongoDbService.request<SearchProxyResponse<T>>(path), cancelled]);
+    return await Promise.race([MongoDbService.request<R>(path), cancelled]);
   } finally {
     clearTimeout(timeoutId);
     if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
 };
+
+export const requestViaProxy = <T>(
+  path: string,
+  signal?: AbortSignal,
+  timeoutMs: number = PROXY_TIMEOUT_MS
+): Promise<SearchProxyResponse<T> | null> => requestBackend<SearchProxyResponse<T>>(path, signal, timeoutMs);
 
 export const searchViaProxy = <T>(
   endpoint: SearchProxyEndpoint,
