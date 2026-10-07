@@ -25,6 +25,7 @@ import { ShareDestination, ShareItemModal } from './ShareItemModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { getCriticRating, getListRating } from '../utils/ratings';
 import { ProviderDestination, resolveDestinationTarget, resolveProviderLinks } from '../services/api/providerLinksService';
+import { PointsToastHost } from './PointsToast';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -48,6 +49,8 @@ interface MediaDetailModalProps {
   /** Listas a las que se puede compartir el elemento; sin `onShareToList` solo se comparte con otras apps. */
   shareDestinations?: ShareDestination[];
   onShareToList?: (listId: string, item: MediaItem) => Promise<boolean>;
+  /** Se llama al abrir la obra en una de sus plataformas (cuenta para la gamificación). */
+  onOpenPlatform?: (item: MediaItem) => void;
 }
 
 const formatReleaseDate = (isoOrYear?: string): string => {
@@ -100,6 +103,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   onRecommendToFriend,
   shareDestinations = [],
   onShareToList,
+  onOpenPlatform,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [userRating, setUserRating] = useState(5);
@@ -166,6 +170,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   // Las apps nativas (p. ej. Netflix) capturan la URL de búsqueda y descartan la consulta,
   // así que en móvil la búsqueda se abre en el navegador integrado.
   const openProviderDestination = (destination: ProviderDestination) => {
+    onOpenPlatform?.(item);
     if (destination.kind === 'search' && Platform.OS !== 'web') {
       WebBrowser.openBrowserAsync(destination.url).catch(() => openUrl(destination.url));
       return;
@@ -859,6 +864,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
       {modalBody}
       {shareModal}
+      <PointsToastHost />
       <ConfirmModal
         visible={showDeleteConfirm}
         title="Eliminar obra"

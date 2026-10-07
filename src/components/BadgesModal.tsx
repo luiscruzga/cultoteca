@@ -3,7 +3,7 @@ import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 import { ProviderBadge } from './ProviderBadge';
 import { Ionicons } from '@expo/vector-icons';
 import { Badge, UserProfile } from '../types';
-import { GamificationService } from '../services/gamificationService';
+import { CULTO_POINTS, GamificationService, POINTS_GUIDE } from '../services/gamificationService';
 import { UserAvatar } from './UserAvatar';
 
 interface BadgesModalProps {
@@ -14,6 +14,12 @@ interface BadgesModalProps {
 
 export const BadgesModal: React.FC<BadgesModalProps> = ({ visible, onClose, profile }) => {
   const rank = GamificationService.getCultoRank(profile.cultoScore);
+  // Pending missions closest to completion first, completed ones at the end.
+  const missions = [...profile.badges].sort((a, b) => {
+    if (a.unlocked !== b.unlocked) return a.unlocked ? 1 : -1;
+    return b.progress / b.maxProgress - a.progress / a.maxProgress;
+  });
+  const completedCount = missions.filter(b => b.unlocked).length;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
@@ -92,30 +98,12 @@ export const BadgesModal: React.FC<BadgesModalProps> = ({ visible, onClose, prof
               <Text style={styles.sectionTitle}>Cómo ganar Puntos de Culto</Text>
             </View>
             <View style={styles.earnGrid}>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+15 pts</Text>
-                <Text style={styles.earnLabel}>Agregar obra a lista</Text>
-              </View>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+20 pts</Text>
-                <Text style={styles.earnLabel}>Marcar obra vista</Text>
-              </View>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+10 pts</Text>
-                <Text style={styles.earnLabel}>Comentar u opinar</Text>
-              </View>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+25 pts</Text>
-                <Text style={styles.earnLabel}>Crear nueva lista</Text>
-              </View>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+10 pts</Text>
-                <Text style={styles.earnLabel}>Girar ruleta de culto</Text>
-              </View>
-              <View style={styles.earnItem}>
-                <Text style={styles.earnPoints}>+15 pts</Text>
-                <Text style={styles.earnLabel}>Conectar con un amigo</Text>
-              </View>
+              {POINTS_GUIDE.map(entry => (
+                <View key={entry.label} style={styles.earnItem}>
+                  <Text style={styles.earnPoints}>+{entry.points} pts</Text>
+                  <Text style={styles.earnLabel}>{entry.label}</Text>
+                </View>
+              ))}
             </View>
           </View>
 
@@ -140,11 +128,17 @@ export const BadgesModal: React.FC<BadgesModalProps> = ({ visible, onClose, prof
           {/* Badges List */}
           <View style={styles.sectionHeader}>
             <Ionicons name="ribbon-outline" size={18} color="#A855F7" />
-            <Text style={styles.sectionTitle}>Insignias y Trofeos Desbloqueables</Text>
+            <Text style={styles.sectionTitle}>Misiones</Text>
+            <Text style={styles.missionsCount}>
+              {completedCount}/{missions.length} completadas
+            </Text>
           </View>
+          <Text style={styles.sectionDesc}>
+            Cada misión completada suma +{CULTO_POINTS.MISSION_COMPLETED} pts. Las más cercanas aparecen primero.
+          </Text>
 
           <View style={styles.badgesGrid}>
-            {profile.badges.map(badge => (
+            {missions.map(badge => (
               <View key={badge.id} style={[styles.badgeCard, !badge.unlocked && styles.lockedBadgeCard]}>
                 <View style={[styles.iconCircle, badge.unlocked ? styles.unlockedIcon : styles.lockedIcon]}>
                   <Ionicons
@@ -368,9 +362,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sectionTitle: {
+    flex: 1,
     fontSize: 15,
     fontWeight: '700',
     color: '#CBD5E1',
+  },
+  missionsCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10B981',
   },
   sectionDesc: {
     fontSize: 12,

@@ -193,7 +193,7 @@ export interface Badge {
   title: string;
   description: string;
   icon: string;
-  category: 'cine' | 'anime' | 'lectura' | 'gaming' | 'social' | 'curador';
+  category: 'cine' | 'anime' | 'lectura' | 'gaming' | 'social' | 'curador' | 'explorador';
   unlocked: boolean;
   progress: number;
   maxProgress: number;
@@ -213,6 +213,14 @@ export interface UserProfile {
   activeSubscriptions: string[]; // e.g. ['Netflix', 'Prime Video', 'Crunchyroll']
   friends?: string[]; // IDs o códigos de usuarios conectados
   followedLists?: string[]; // IDs de listas seguidas por el usuario
+  gamificationCounters?: GamificationCounters;
+}
+
+/** Acciones puntuales que no dejan rastro en listas, vistos o favoritos; se guardan con el perfil. */
+export interface GamificationCounters {
+  rouletteSpins?: number;
+  itemsShared?: number;
+  platformOpens?: number;
 }
 
 /** Obra marcada como vista por un usuario; se aplica en todas las listas donde aparezca. */

@@ -15,6 +15,7 @@ import { MediaItem } from '../types';
 import { ProviderBadge } from './ProviderBadge';
 import { RatingStars } from './RatingStars';
 import { remoteImageSource } from '../utils/remoteImage';
+import { PointsToastHost } from './PointsToast';
 
 interface CultoRouletteModalProps {
   visible: boolean;
@@ -188,6 +189,7 @@ export const CultoRouletteModal: React.FC<CultoRouletteModalProps> = ({
           </View>
         </View>
       </View>
+      <PointsToastHost />
     </Modal>
   );
 };

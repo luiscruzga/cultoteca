@@ -25,6 +25,7 @@ import { AppUpdatesModal } from './src/components/AppUpdatesModal';
 import { ShareDestination } from './src/components/ShareItemModal';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
+import { PointsToastHost, showPointsToast } from './src/components/PointsToast';
 import { ConfirmModal } from './src/components/ConfirmModal';
 import { CollaborativeListCard } from './src/components/CollaborativeListCard';
 import { CultoRouletteModal } from './src/components/CultoRouletteModal';
@@ -70,8 +71,10 @@ const formatTimeAgo = (iso: string) => {
 };
 import {
   ActivityEvent,
+  Badge,
   CollaborativeList,
   DirectRecommendation,
+  GamificationCounters,
   ListActivityNotification,
   MediaCategory,
   FavoriteItem,
@@ -120,6 +123,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [listForm, setListForm] = useState<{ key: number; list: CollaborativeList | null } | null>(null);
   const [isSavingList, setIsSavingList] = useState(false);
   const [isListsLoading, setIsListsLoading] = useState(false);
+  // User whose lists are loaded; gamification waits for it so an empty state never lowers the score.
+  const [listsLoadedFor, setListsLoadedFor] = useState('');
   // With Clerk, the main section waits until the session has been resolved.
   const [sessionChecked, setSessionChecked] = useState(!clerkEnabled);
   // The in-list search is scoped to the list it was typed in, so switching lists clears it.
@@ -376,6 +381,64 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     openListItem(fav.listId, fav.mediaId, fav.item);
   };
 
+  // CultoScore and missions are derived from real activity and recomputed whenever it changes.
+  // Waits until lists, watched works and favorites are loaded so an empty state never lowers the score.
+  const gamification = useMemo(() => {
+    if (!profile || listsLoadedFor !== profile.id) return null;
+    if (watchedState.userId !== profile.id || favoritesState.userId !== profile.id) return null;
+    return GamificationService.evaluate(
+      {
+        userId: profile.id,
+        lists,
+        watched: watchedEntries,
+        favoritesCount: favorites.length,
+        followedListsCount: followedListIds.length,
+        friendsCount: profile.friends?.length ?? 0,
+        subscriptionsCount: profile.activeSubscriptions?.length ?? 0,
+        counters: profile.gamificationCounters,
+      },
+      profile.badges
+    );
+  }, [profile, listsLoadedFor, lists, watchedEntries, favorites, followedListIds, watchedState.userId, favoritesState.userId]);
+  const scoredProfile = useMemo(
+    () => (profile && gamification ? { ...profile, cultoScore: gamification.score, badges: gamification.badges } : profile),
+    [profile, gamification]
+  );
+
+  const lastGamificationRef = useRef<{ userId: string; score: number; unlocked: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!profile || !gamification) return;
+    const { score, badges } = gamification;
+    const unlocked = new Set(badges.filter(b => b.unlocked).map(b => b.id));
+    const last = lastGamificationRef.current;
+    lastGamificationRef.current = { userId: profile.id, score, unlocked };
+    // The first evaluation after sign-in only sets the baseline.
+    if (last?.userId === profile.id) {
+      const gained = score - last.score;
+      const missions = badges.filter(b => b.unlocked && !last.unlocked.has(b.id)).map(b => b.title);
+      if (gained > 0 || missions.length > 0) showPointsToast({ points: Math.max(0, gained), missions });
+    }
+    const badgeKey = (list: Badge[] = []) => list.map(b => `${b.id}:${b.progress}:${b.unlocked}`).join('|');
+    if (score === profile.cultoScore && badgeKey(badges) === badgeKey(profile.badges)) return;
+    // Keep the stored profile in sync so other profile writes never persist a stale score.
+    const updatedProf = { ...profile, cultoScore: score, badges };
+    StorageService.updateProfile(updatedProf).then(() =>
+      setProfile(prev => (prev && prev.id === updatedProf.id ? { ...prev, cultoScore: score, badges } : prev))
+    );
+  }, [profile, gamification]);
+
+  /** Counts one-off actions (roulette, sharing, opening a platform) that leave no trace elsewhere. */
+  const incrementGamificationCounter = (key: keyof GamificationCounters) => {
+    if (!profile) return;
+    const counters = profile.gamificationCounters ?? {};
+    const updatedProf: UserProfile = {
+      ...profile,
+      gamificationCounters: { ...counters, [key]: (counters[key] ?? 0) + 1 },
+    };
+    setProfile(updatedProf);
+    StorageService.updateProfile(updatedProf);
+  };
+
   const homeFeed = useMemo(
     () =>
       buildHomeFeed({
@@ -462,16 +525,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       setFollowedListIds(storedFollowed);
       setActivities(storedActivity);
       setSelectedList(pickInitialList(storedLists, newUser.id, storedFollowed));
-      setProfile(prev =>
-        prev && prev.id === newUser.id
-          ? {
-              ...prev,
-              cultoScore: GamificationService.calculateCultoScore(storedLists, newUser.id),
-              badges: GamificationService.updateBadges(prev.badges, storedLists, newUser.id),
-              followedLists: storedFollowed,
-            }
-          : prev
-      );
+      setProfile(prev => (prev && prev.id === newUser.id ? { ...prev, followedLists: storedFollowed } : prev));
+      setListsLoadedFor(newUser.id);
     } catch (e) {
       console.warn('Error loading user data:', e);
     } finally {
@@ -491,6 +546,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const clearSession = () => {
     setProfile(null);
     setLists([]);
+    setListsLoadedFor('');
     setActivities([]);
     setFollowedListIds([]);
     setSelectedList(null);
@@ -514,16 +570,10 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const handleToggleFollowList = async (listId: string) => {
     if (!profile) return;
     try {
-      const { isFollowing, followedLists: updated } = await StorageService.toggleFollowList(profile.id, listId);
+      const { followedLists: updated } = await StorageService.toggleFollowList(profile.id, listId);
       setFollowedListIds(updated);
-      const newScore = isFollowing ? (profile.cultoScore || 0) + 5 : profile.cultoScore;
-      const updatedProf: UserProfile = {
-        ...profile,
-        followedLists: updated,
-        cultoScore: newScore,
-      };
-      setProfile(updatedProf);
-      await StorageService.updateProfile(updatedProf);
+      // Points for following are recomputed by the gamification effect.
+      setProfile(prev => (prev && prev.id === profile.id ? { ...prev, followedLists: updated } : prev));
       await refreshNotificationsCount();
     } catch (err) {
       console.warn('Error toggling list follow:', err);
@@ -604,7 +654,9 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       addedAt: new Date().toISOString(),
       comments: [],
     };
-    return addItemToListAndRefresh(listId, item);
+    const added = await addItemToListAndRefresh(listId, item);
+    if (added) incrementGamificationCounter('itemsShared');
+    return added;
   };
 
   const addItemToListAndRefresh = async (listId: string, item: MediaItem): Promise<boolean> => {
@@ -620,13 +672,6 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     if (selectedList && selectedList.id === listId) {
       const target = updated.find(l => l.id === listId);
       if (target) setSelectedList(target);
-    }
-    if (profile) {
-      const newScore = GamificationService.calculateCultoScore(updated, profile.id);
-      const newBadges = GamificationService.updateBadges(profile.badges, updated, profile.id);
-      const updatedProf = { ...profile, cultoScore: newScore, badges: newBadges };
-      setProfile(updatedProf);
-      await StorageService.updateProfile(updatedProf);
     }
     const refreshedAct = await StorageService.getActivity();
     setActivities(refreshedAct);
@@ -671,15 +716,6 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
 
     setLists(updated);
     setSelectedList(prev => (prev ? updated.find(l => l.id === prev.id) ?? prev : prev));
-
-    // Refresh profile score
-    if (profile) {
-      const newScore = GamificationService.calculateCultoScore(updated, profile.id);
-      const newBadges = GamificationService.updateBadges(profile.badges, updated, profile.id);
-      const updatedProf = { ...profile, cultoScore: newScore, badges: newBadges };
-      setProfile(updatedProf);
-      await StorageService.updateProfile(updatedProf);
-    }
     const refreshedAct = await StorageService.getActivity();
     setActivities(refreshedAct);
   };
@@ -897,7 +933,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
                 activeOpacity={0.8}
               >
                 <Ionicons name="sparkles" size={13} color="#F59E0B" />
-                <Text style={styles.scorePillText}>{profile.cultoScore} pts</Text>
+                <Text style={styles.scorePillText}>{scoredProfile?.cultoScore ?? profile.cultoScore} pts</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1534,6 +1570,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           onToggleFavorite={findSourceList(selectedMedia) ? handleToggleFavorite : undefined}
           shareDestinations={getShareDestinations(selectedMedia)}
           onShareToList={handleShareItemToList}
+          onOpenPlatform={() => incrementGamificationCounter('platformOpens')}
         />
       )}
 
@@ -1556,15 +1593,18 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           items={selectedList.items}
           listTitle={selectedList.title}
           onViewSelected={handleMediaPress}
+          onSpinComplete={winner => {
+            if (winner) incrementGamificationCounter('rouletteSpins');
+          }}
           isWatched={isWatchedByMe}
         />
       )}
 
-      {profile && (
+      {scoredProfile && (
         <BadgesModal
           visible={isBadgesVisible}
           onClose={() => setIsBadgesVisible(false)}
-          profile={profile}
+          profile={scoredProfile}
         />
       )}
 
@@ -1670,6 +1710,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           </View>
         </View>
       </Modal>
+      <PointsToastHost />
     </SafeAreaView>
   );
 }

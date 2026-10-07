@@ -30,6 +30,7 @@ import { SearchLoadingSkeleton } from './SearchLoadingSkeleton';
 import { MediaDetailModal } from './MediaDetailModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { isItemInList } from '../utils/mediaIdentity';
+import { PointsToastHost } from './PointsToast';
 
 interface AddMediaModalProps {
   visible: boolean;
@@ -1007,6 +1008,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
           />
         )}
       </View>
+      <PointsToastHost />
     </Modal>
   );
 };
