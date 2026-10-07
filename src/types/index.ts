@@ -162,6 +162,17 @@ export interface CollaborativeList {
   updatedAt: string;
 }
 
+/** Usuario suscrito a una lista, con su rol de mayor prioridad (dueño > colaborador > publicó > seguidor). */
+export interface ListMember {
+  id: string;
+  name: string;
+  avatar?: string;
+  handle?: string;
+  userCode?: string;
+  role: 'owner' | 'collaborator' | 'contributor' | 'follower';
+  contributions: number; // Ítems añadidos + comentarios publicados en la lista
+}
+
 export interface ActivityEvent {
   id: string;
   userId: string;

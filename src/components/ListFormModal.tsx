@@ -103,6 +103,12 @@ export const ListFormModal: React.FC<ListFormModalProps> = ({ visible, list, sav
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={() => !saving && onCancel()}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => !saving && onCancel()}
+          accessibilityLabel="Cerrar formulario de lista"
+        />
         <View style={styles.dialog}>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>{isEdit ? 'Editar lista' : 'Crear Nueva Lista Colaborativa'}</Text>

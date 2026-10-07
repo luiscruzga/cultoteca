@@ -22,6 +22,13 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ uri, visible
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.backdrop}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={onClose}
+          accessibilityLabel="Cerrar imagen"
+        />
+        {/* pointerEvents none: tapping the image (or its letterbox) also closes the viewer. */}
         <Image
           source={remoteImageSource(source)}
           style={styles.image}
@@ -55,6 +62,7 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+    pointerEvents: 'none',
   },
   closeBtn: {
     position: 'absolute',

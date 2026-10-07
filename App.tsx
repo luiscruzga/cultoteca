@@ -28,6 +28,7 @@ import { ConfirmModal } from './src/components/ConfirmModal';
 import { CollaborativeListCard } from './src/components/CollaborativeListCard';
 import { CultoRouletteModal } from './src/components/CultoRouletteModal';
 import { InviteUsersModal } from './src/components/InviteUsersModal';
+import { ListMembersModal } from './src/components/ListMembersModal';
 import { MediaCard } from './src/components/MediaCard';
 import { MediaDetailModal } from './src/components/MediaDetailModal';
 import { NotificationsModal } from './src/components/NotificationsModal';
@@ -129,6 +130,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [savingItemIds, setSavingItemIds] = useState<string[]>([]);
   const [joinCode, setJoinCode] = useState('');
   const [isInviteUsersVisible, setIsInviteUsersVisible] = useState(false);
+  const [isListMembersVisible, setIsListMembersVisible] = useState(false);
   const [isUpdatesVisible, setIsUpdatesVisible] = useState(false);
   const [pendingUpdateInfo, setPendingUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isRefreshingLists, setIsRefreshingLists] = useState(false);
@@ -1083,6 +1085,15 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
 
               <View style={styles.listActionBar}>
                 <View style={styles.listSecondaryActions}>
+                  <TouchableOpacity
+                    style={styles.visibilityListBtn}
+                    onPress={() => setIsListMembersVisible(true)}
+                    activeOpacity={0.8}
+                    accessibilityLabel="Ver miembros de la lista"
+                  >
+                    <Ionicons name="people-outline" size={14} color="#CBD5E1" />
+                    <Text style={styles.visibilityListBtnText}>Miembros</Text>
+                  </TouchableOpacity>
                   {profile && StorageService.canUserDeleteList(selectedList, profile.id) ? (
                     <>
                     <TouchableOpacity
@@ -1143,7 +1154,17 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
                         {followedListIds.includes(selectedList.id) ? 'Siguiendo' : 'Seguir'}
                       </Text>
                     </TouchableOpacity>
-                  ) : null}
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.followListBtn}
+                      onPress={() => setIsAuthModalVisible(true)}
+                      activeOpacity={0.8}
+                      accessibilityLabel="Inicia sesión para seguir la lista"
+                    >
+                      <Ionicons name="bookmark-outline" size={14} color="#94A3B8" />
+                      <Text style={styles.followListBtnText}>Seguir</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {/* Roulette button "¿Qué vemos hoy?" */}
@@ -1535,6 +1556,26 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
         onListUpdated={replaceList}
       />
 
+      <ListMembersModal
+        visible={isListMembersVisible}
+        onClose={() => setIsListMembersVisible(false)}
+        currentUserId={profile?.id}
+        list={selectedList}
+        isFollowing={Boolean(selectedList && followedListIds.includes(selectedList.id))}
+        onToggleFollow={
+          selectedList && !(profile && StorageService.canUserDeleteList(selectedList, profile.id))
+            ? async () => {
+                if (!profile) {
+                  setIsListMembersVisible(false);
+                  setIsAuthModalVisible(true);
+                  return;
+                }
+                await handleToggleFollowList(selectedList.id);
+              }
+            : undefined
+        }
+      />
+
       {/* Public Lists Discovery Modal */}
       <PublicListsModal
         visible={isPublicListsVisible}
@@ -1564,6 +1605,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       {/* Join List Modal */}
       <Modal visible={isJoinListVisible} animationType="slide" transparent onRequestClose={() => setIsJoinListVisible(false)}>
         <View style={styles.modalOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsJoinListVisible(false)} />
           <View style={styles.dialogBox}>
             <Text style={styles.dialogTitle}>Unirse a Lista de Amigos</Text>
             <Text style={styles.dialogSubtitle}>Ingresa el código que te compartió tu amigo (ej. CULTO-SCIFI-2026):</Text>

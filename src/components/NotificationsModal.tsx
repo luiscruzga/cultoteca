@@ -637,8 +637,18 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 
           {/* List Picker Modal when user chooses "Guardar en otra lista" */}
           {selectedRecForList && (
-            <Modal visible={Boolean(selectedRecForList)} transparent animationType="fade">
+            <Modal
+              visible={Boolean(selectedRecForList)}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setSelectedRecForList(null)}
+            >
               <View style={styles.pickerOverlay}>
+                <TouchableOpacity
+                  style={StyleSheet.absoluteFill}
+                  activeOpacity={1}
+                  onPress={() => setSelectedRecForList(null)}
+                />
                 <View style={styles.pickerCard}>
                   <View style={styles.pickerHeader}>
                     <Text style={styles.pickerTitle}>Elige una lista de destino</Text>

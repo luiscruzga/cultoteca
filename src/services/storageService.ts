@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityEvent, CollaborativeList, CustomCategory, DirectRecommendation, FavoriteItem, ListActivityNotification, ListInvitation, MediaComment, MediaItem, ReleaseTrackingInfo, UserProfile, WatchedEntry } from '../types';
+import { ActivityEvent, CollaborativeList, CustomCategory, DirectRecommendation, FavoriteItem, ListActivityNotification, ListInvitation, ListMember, MediaComment, MediaItem, ReleaseTrackingInfo, UserProfile, WatchedEntry } from '../types';
 import { CURATED_CULT_CATALOG } from './api/mediaSearchService';
 import { cancelReleaseNotification } from './releaseTrackingService';
 import { MongoDbService, LoginLogEntry, AuditLogEntry } from './mongoDbService';
@@ -540,6 +540,57 @@ export const StorageService = {
     if (list.isPublic) return true;
     if (!userId) return false;
     return list.owner.id === userId || list.collaborators.some(c => c.id === userId);
+  },
+
+  /**
+   * Dueño, colaboradores, quienes han publicado (ítems o comentarios) y seguidores de una lista, sin duplicados.
+   * `followerId` añade al usuario actual como seguidor aunque el directorio esté desactualizado.
+   */
+  async getListMembers(list: CollaborativeList, options: { followerId?: string } = {}): Promise<ListMember[]> {
+    let directory: UserProfile[] = [];
+    try {
+      directory = await this.getUsersDirectory();
+    } catch (e) {
+      console.warn('Error loading users directory for list members:', e);
+    }
+    const byId = new Map(directory.map(u => [u.id, u]));
+
+    const contributions = new Map<string, { user: { id: string; name: string; avatar?: string }; count: number }>();
+    const countContribution = (user: { id: string; name: string; avatar?: string } | undefined) => {
+      if (!user?.id) return;
+      const entry = contributions.get(user.id);
+      if (entry) entry.count += 1;
+      else contributions.set(user.id, { user, count: 1 });
+    };
+    list.items.forEach(item => {
+      countContribution(item.addedBy);
+      item.comments?.forEach(c => countContribution({ id: c.userId, name: c.userName, avatar: c.userAvatar }));
+    });
+
+    const members = new Map<string, ListMember>();
+    const add = (user: { id: string; name: string; avatar?: string }, role: ListMember['role']) => {
+      if (!user.id || members.has(user.id)) return;
+      const profile = byId.get(user.id);
+      members.set(user.id, {
+        id: user.id,
+        name: profile?.name || user.name,
+        avatar: profile?.avatar ?? user.avatar,
+        handle: profile?.handle,
+        userCode: profile?.userCode,
+        role,
+        contributions: contributions.get(user.id)?.count ?? 0,
+      });
+    };
+
+    add(list.owner, 'owner');
+    list.collaborators.forEach(c => add(c, c.role === 'owner' ? 'owner' : 'collaborator'));
+    contributions.forEach(({ user }) => add(user, 'contributor'));
+    directory.filter(u => u.followedLists?.includes(list.id)).forEach(u => add(u, 'follower'));
+    if (options.followerId) {
+      const me = byId.get(options.followerId) ?? (await this.getProfile());
+      if (me && me.id === options.followerId) add(me, 'follower');
+    }
+    return [...members.values()];
   },
 
   isListInUserHome(list: CollaborativeList, userId?: string | null, followedListIds: string[] = []): boolean {
@@ -1293,13 +1344,23 @@ export const StorageService = {
   },
 
   async getFollowedLists(userId?: string): Promise<string[]> {
+    if (!userId) return [];
+    const key = `${FOLLOWED_LISTS_KEY}:${userId}`;
     try {
-      const data = await AsyncStorage.getItem(FOLLOWED_LISTS_KEY);
-      if (data) {
-        return JSON.parse(data);
+      if (MongoDbService.isConfigured()) {
+        const remote = await MongoDbService.getUserById(userId);
+        if (remote && Array.isArray(remote.followedLists)) {
+          await AsyncStorage.setItem(key, JSON.stringify(remote.followedLists));
+          return remote.followedLists;
+        }
       }
+      const data = await AsyncStorage.getItem(key);
+      if (data) return JSON.parse(data);
       const profile = await this.getProfile();
-      return profile?.followedLists || [];
+      if (profile?.id !== userId) return [];
+      // Migra la caché global antigua (compartida entre usuarios) solo para el perfil guardado.
+      const legacy = await AsyncStorage.getItem(FOLLOWED_LISTS_KEY);
+      return profile.followedLists || (legacy ? JSON.parse(legacy) : []);
     } catch {
       return [];
     }
@@ -1310,12 +1371,14 @@ export const StorageService = {
       const current = await this.getFollowedLists(userId);
       const isFollowing = current.includes(listId);
       const updated = isFollowing ? current.filter(id => id !== listId) : [...current, listId];
-      await AsyncStorage.setItem(FOLLOWED_LISTS_KEY, JSON.stringify(updated));
+      await AsyncStorage.setItem(`${FOLLOWED_LISTS_KEY}:${userId}`, JSON.stringify(updated));
 
       const profile = await this.getProfile();
       if (profile && profile.id === userId) {
-        profile.followedLists = updated;
-        await this.updateProfile(profile);
+        const updatedProfile = { ...profile, followedLists: updated };
+        // saveUserToDirectory persiste también en MongoDB, así el directorio refleja el nuevo seguimiento.
+        await this.saveProfileLocal(updatedProfile);
+        await this.saveUserToDirectory(updatedProfile);
       }
 
       if (MongoDbService.isConfigured()) {
@@ -1330,7 +1393,7 @@ export const StorageService = {
       return { isFollowing: !isFollowing, followedLists: updated };
     } catch (e) {
       console.warn('Error toggling followed list:', e);
-      return { isFollowing: false, followedLists: [] };
+      throw e;
     }
   },
 
