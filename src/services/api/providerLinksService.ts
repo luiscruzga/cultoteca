@@ -41,18 +41,25 @@ const hasTitlePath = (url: string): boolean => {
   return Boolean(match && match[1] && match[1] !== '/');
 };
 
+export interface ProviderDestination {
+  url: string;
+  /** 'search': búsqueda dentro de la plataforma; su app nativa suele descartar la consulta. */
+  kind: 'direct' | 'search' | 'fallback';
+}
+
 /**
- * URL a abrir al tocar un proveedor: enlace directo → búsqueda dentro de la plataforma →
+ * Destino al tocar un proveedor: enlace directo → búsqueda dentro de la plataforma →
  * JustWatch (cine y series) → undefined (badge no tocable).
  */
-export const resolveDestination = (provider: StreamingProvider, item: MediaItem): string | undefined => {
-  if (provider.url && (provider.linkKind || hasTitlePath(provider.url))) return provider.url;
+export const resolveDestinationTarget = (provider: StreamingProvider, item: MediaItem): ProviderDestination | undefined => {
+  if (provider.url && (provider.linkKind || hasTitlePath(provider.url))) return { url: provider.url, kind: 'direct' };
 
   const searchUrl = getPlatformSearchUrl(provider.name, item.title);
-  if (searchUrl) return searchUrl;
+  if (searchUrl) return { url: searchUrl, kind: 'search' };
 
   if (item.category === 'movie' || item.category === 'series') {
-    return item.externalLinks?.find(link => link.label === 'JustWatch')?.url;
+    const justWatch = item.externalLinks?.find(link => link.label === 'JustWatch')?.url;
+    if (justWatch) return { url: justWatch, kind: 'fallback' };
   }
   return undefined;
 };

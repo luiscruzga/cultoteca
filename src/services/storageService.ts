@@ -6,6 +6,7 @@ import { MongoDbService, LoginLogEntry, AuditLogEntry } from './mongoDbService';
 import { Platform } from 'react-native';
 import { isCategoryAllowed } from '../utils/listCategories';
 import { isItemInList, isSameWork, toWatchedEntry, toWork } from '../utils/mediaIdentity';
+import { sanitizeListsForViewer } from '../utils/listAccess';
 
 const LISTS_KEY = '@cultoteca_lists_v1';
 const PROFILE_KEY = '@cultoteca_profile_v1';
@@ -86,13 +87,25 @@ export const INITIAL_LISTS: CollaborativeList[] = [];
 
 export const INITIAL_ACTIVITY: ActivityEvent[] = [];
 
+/** Id del perfil guardado en este dispositivo, sin efectos secundarios. */
+const getCachedProfileId = async (): Promise<string | null> => {
+  try {
+    const data = await AsyncStorage.getItem(PROFILE_KEY);
+    return data ? JSON.parse(data)?.id ?? null : null;
+  } catch {
+    return null;
+  }
+};
+
 export const StorageService = {
   async getLists(): Promise<CollaborativeList[]> {
     try {
+      // La caché es de todo el dispositivo: solo se muestran las listas y elementos que el usuario puede ver
+      const viewerId = await getCachedProfileId();
       if (MongoDbService.isConfigured()) {
         const remoteLists = await MongoDbService.getLists();
         if (remoteLists) {
-          const filtered = remoteLists.filter(l => !DUMMY_LIST_IDS.has(l.id));
+          const filtered = sanitizeListsForViewer(remoteLists.filter(l => !DUMMY_LIST_IDS.has(l.id)), viewerId);
           await AsyncStorage.setItem(LISTS_KEY, JSON.stringify(filtered));
           return filtered;
         }
@@ -104,7 +117,7 @@ export const StorageService = {
         if (filtered.length !== parsed.length) {
           await AsyncStorage.setItem(LISTS_KEY, JSON.stringify(filtered));
         }
-        return filtered;
+        return sanitizeListsForViewer(filtered, viewerId);
       }
       return INITIAL_LISTS;
     } catch {
@@ -141,12 +154,15 @@ export const StorageService = {
       // Avoid duplicates of the same work
       const exists = isItemInList(item, targetList.items);
       if (!exists) {
-        targetList.items.unshift(item);
-        targetList.updatedAt = new Date().toISOString();
+        const updatedList = { ...targetList, items: [item, ...targetList.items], updatedAt: new Date().toISOString() };
+        // El servidor valida el permiso con el estado real de la lista: si lo rechaza, la caché no cambia
+        if (MongoDbService.isConfigured()) {
+          await MongoDbService.insertOrUpdateList(updatedList, { strict: true });
+        }
+        Object.assign(targetList, updatedList);
         await AsyncStorage.setItem(LISTS_KEY, JSON.stringify(lists));
 
         if (MongoDbService.isConfigured()) {
-          await MongoDbService.insertOrUpdateList(targetList);
           // Audit log is non-critical: don't block the UI on it.
           MongoDbService.logAction({
             userId: item.addedBy.id,
@@ -709,8 +725,40 @@ export const StorageService = {
   },
 
   async joinListByCode(code: string, user: { id: string; name: string; avatar?: string }): Promise<CollaborativeList | null> {
-    const lists = await this.getLists();
     const cleanCode = code.trim().toUpperCase();
+    if (MongoDbService.isConfigured()) {
+      // Los códigos de listas ajenas no llegan al cliente: el servidor resuelve la unión
+      const remote = await MongoDbService.joinListByCode(cleanCode, { name: user.name, avatar: user.avatar });
+      if (remote) {
+        if (remote.list && remote.joined) {
+          MongoDbService.logAction({
+            userId: user.id,
+            userName: user.name,
+            actionType: 'joined_list',
+            targetTitle: remote.list.title,
+            targetId: remote.list.id,
+            listTitle: remote.list.title,
+            details: `Se unió a la lista "${remote.list.title}" con código ${cleanCode}`,
+          }).catch(err => console.warn('[StorageService] Error logging joined_list:', err));
+          await this.recordActivity({
+            id: `act-${Date.now()}`,
+            userId: user.id,
+            userName: user.name,
+            userAvatar: user.avatar,
+            action: 'joined_list',
+            targetTitle: remote.list.title,
+            targetCategory: 'movie',
+            listTitle: remote.list.title,
+            timestamp: 'Justo ahora'
+          });
+        }
+        // Refresca la caché con la lista recién unida
+        await this.getLists();
+        return remote.list;
+      }
+    }
+
+    const lists = await this.getLists();
     const target = lists.find(l => l.inviteCode.toUpperCase() === cleanCode);
     if (!target) return null;
 
@@ -1177,7 +1225,13 @@ export const StorageService = {
       });
       return targetList;
     } else {
-      await this.addMediaToList(targetList.id, itemToInsert);
+      try {
+        await this.addMediaToList(targetList.id, itemToInsert);
+      } catch (err) {
+        // La recomendación directa ya se guardó; la lista del destinatario puede no admitir aportes
+        console.warn('[StorageService] No se pudo agregar a «Recomendadas por amigos»:', err);
+        return targetList;
+      }
       const updatedLists = await this.getLists();
       return updatedLists.find(l => l.id === targetList!.id) || targetList;
     }

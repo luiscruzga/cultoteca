@@ -1,5 +1,7 @@
 import { Linking, Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { UpdateInfo } from '../types';
 
 const appJson = require('../../app.json');
@@ -12,6 +14,20 @@ const STORAGE_KEYS = {
 
 // Minimum time between non-forced (automatic) checks; also keeps us under GitHub's 60 req/h limit
 const AUTO_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+const APK_MIME_TYPE = 'application/vnd.android.package-archive';
+const FLAG_GRANT_READ_URI_PERMISSION = 0x00000001;
+const FLAG_ACTIVITY_NEW_TASK = 0x10000000;
+// Por debajo de esto la "APK" es una página de error o una descarga truncada
+const MIN_APK_BYTES = 1024 * 1024;
+
+export interface ApkDownloadProgress {
+  writtenBytes: number;
+  /** 0 cuando el servidor no informa el tamaño. */
+  totalBytes: number;
+}
+
+let activeDownload: FileSystem.DownloadResumable | null = null;
 
 // Semver clean & comparison helper
 export function isNewerVersion(remoteVersion: string, currentVersion: string): boolean {
@@ -217,7 +233,8 @@ export class UpdateService {
   }
 
   /**
-   * Inicia la descarga e instalación del archivo APK abriendo el enlace
+   * Fuera de Android abre el enlace de la APK; en Android la descarga se hace dentro de la app
+   * con `downloadApk` + `installApk`.
    */
   static async downloadAndInstallApk(apkUrl?: string): Promise<boolean> {
     if (!apkUrl) {
@@ -227,25 +244,80 @@ export class UpdateService {
       );
       return false;
     }
+    return this.openApkDownload(apkUrl);
+  }
+
+  /**
+   * Descarga la APK al caché de la app informando el progreso. Devuelve la URI local del archivo
+   * verificado, o null si se canceló. Lanza un error si la descarga falla o queda incompleta.
+   */
+  static async downloadApk(
+    apkUrl: string,
+    version: string,
+    onProgress: (progress: ApkDownloadProgress) => void
+  ): Promise<string | null> {
+    if (!FileSystem.cacheDirectory) throw new Error('Almacenamiento no disponible');
+    const dir = `${FileSystem.cacheDirectory}updates/`;
+    // Las APK de descargas anteriores (o parciales) se descartan
+    await FileSystem.deleteAsync(dir, { idempotent: true });
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    const fileUri = `${dir}cultoteca-${version.replace(/[^\w.-]/g, '')}.apk`;
+
+    let expectedBytes = 0;
+    const task = FileSystem.createDownloadResumable(
+      apkUrl,
+      fileUri,
+      { headers: { Accept: 'application/vnd.android.package-archive,application/octet-stream,*/*' } },
+      ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        if (totalBytesExpectedToWrite > 0) expectedBytes = totalBytesExpectedToWrite;
+        onProgress({ writtenBytes: totalBytesWritten, totalBytes: Math.max(totalBytesExpectedToWrite, 0) });
+      }
+    );
+    activeDownload = task;
 
     try {
-      const supported = await Linking.canOpenURL(apkUrl);
-      if (supported) {
-        await Linking.openURL(apkUrl);
-        return true;
-      } else {
-        // En algunos dispositivos canOpenURL puede dar false para descargas directas, intentar abrir directamente
-        await Linking.openURL(apkUrl);
-        return true;
+      const result = await task.downloadAsync();
+      if (!result) return null; // cancelada
+      if (result.status < 200 || result.status >= 300) {
+        throw new Error(`HTTP ${result.status}`);
       }
+      const info = await FileSystem.getInfoAsync(result.uri);
+      const size = info.exists ? info.size : 0;
+      if (size < MIN_APK_BYTES || (expectedBytes > 0 && size !== expectedBytes)) {
+        throw new Error('Descarga incompleta');
+      }
+      return result.uri;
     } catch (error) {
-      console.error('Error al intentar abrir el enlace de la APK:', error);
-      Alert.alert(
-        'Error de descarga',
-        'No fue posible iniciar la descarga de la nueva versión. Por favor verifica tu conexión a internet.'
-      );
-      return false;
+      await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => undefined);
+      if (activeDownload !== task) return null; // cancelada por el usuario
+      throw error;
+    } finally {
+      if (activeDownload === task) activeDownload = null;
     }
   }
-}
 
+  /** Cancela la descarga en curso, si la hay. */
+  static async cancelDownload(): Promise<void> {
+    const task = activeDownload;
+    activeDownload = null;
+    await task?.cancelAsync().catch(() => undefined);
+  }
+
+  /** Abre el instalador de paquetes de Android con la APK descargada. */
+  static async installApk(fileUri: string): Promise<void> {
+    const contentUri = await FileSystem.getContentUriAsync(fileUri);
+    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      type: APK_MIME_TYPE,
+      flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
+    });
+  }
+
+  /** Abre el ajuste "Instalar apps desconocidas" de Cultoteca. */
+  static async openInstallPermissionSettings(): Promise<void> {
+    const packageName = appJson?.expo?.android?.package;
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.MANAGE_UNKNOWN_APP_SOURCES, {
+      data: packageName ? `package:${packageName}` : undefined,
+    });
+  }
+}

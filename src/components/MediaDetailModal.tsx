@@ -4,6 +4,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
 import { CastMember, MediaItem, StreamingProvider } from '../types';
 import { MarkdownText } from './MarkdownText';
 import { ProviderBadge } from './ProviderBadge';
@@ -19,9 +21,10 @@ import { RatingStars } from './RatingStars';
 import { ConfirmModal } from './ConfirmModal';
 import { PersonDetailModal } from './PersonDetailModal';
 import { ImageViewerModal } from './ImageViewerModal';
+import { ShareDestination, ShareItemModal } from './ShareItemModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { getCriticRating, getListRating } from '../utils/ratings';
-import { resolveDestination, resolveProviderLinks } from '../services/api/providerLinksService';
+import { ProviderDestination, resolveDestinationTarget, resolveProviderLinks } from '../services/api/providerLinksService';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -42,6 +45,9 @@ interface MediaDetailModalProps {
   onToggleFavorite?: (item: MediaItem) => void;
   onToggleTrackingNotification?: (item: MediaItem) => void;
   onRecommendToFriend?: (item: MediaItem) => void;
+  /** Listas a las que se puede compartir el elemento; sin `onShareToList` solo se comparte con otras apps. */
+  shareDestinations?: ShareDestination[];
+  onShareToList?: (listId: string, item: MediaItem) => Promise<boolean>;
 }
 
 const formatReleaseDate = (isoOrYear?: string): string => {
@@ -92,12 +98,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   onToggleFavorite,
   onToggleTrackingNotification,
   onRecommendToFriend,
+  shareDestinations = [],
+  onShareToList,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [userRating, setUserRating] = useState(5);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<CastMember | null>(null);
   const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
+  const [isShareVisible, setIsShareVisible] = useState(false);
   // Proveedores con enlaces directos resueltos al abrir el detalle; solo en memoria, no se guardan en la lista.
   const [resolvedProviders, setResolvedProviders] = useState<{ itemId: string; providers: StreamingProvider[] } | null>(null);
 
@@ -154,6 +163,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     Linking.openURL(url).catch(err => console.warn('Could not open link:', err));
   };
 
+  // Las apps nativas (p. ej. Netflix) capturan la URL de búsqueda y descartan la consulta,
+  // así que en móvil la búsqueda se abre en el navegador integrado.
+  const openProviderDestination = (destination: ProviderDestination) => {
+    if (destination.kind === 'search' && Platform.OS !== 'web') {
+      WebBrowser.openBrowserAsync(destination.url).catch(() => openUrl(destination.url));
+      return;
+    }
+    openUrl(destination.url);
+  };
+
   const modalBody = (
     <View style={[styles.container, embedded && styles.embeddedContainer]}>
       {/* Backdrop or Header */}
@@ -165,6 +184,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           {item.title}
         </Text>
         <View style={styles.topBarActions}>
+          <TouchableOpacity
+            onPress={() => setIsShareVisible(true)}
+            style={styles.detailRecommendTopBtn}
+            accessibilityLabel="Compartir"
+          >
+            <Ionicons name="share-social-outline" size={20} color="#38BDF8" />
+          </TouchableOpacity>
           {onRecommendToFriend && (
             <TouchableOpacity
               onPress={() => onRecommendToFriend(item)}
@@ -195,9 +221,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
             >
               <Ionicons name="trash-outline" size={20} color="#EF4444" />
             </TouchableOpacity>
-          ) : (
-            !onToggleFavorite && !onRecommendToFriend && <View style={{ width: 40 }} />
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -390,6 +414,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </Text>
             </TouchableOpacity>
           )}
+          {/* Compartir con otras listas u otras apps */}
+          <TouchableOpacity
+            style={styles.recommendDetailBtn}
+            onPress={() => setIsShareVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="share-social" size={17} color="#38BDF8" />
+            <Text style={styles.recommendDetailBtnText}>
+              {onShareToList ? 'Compartir en otra lista o app' : 'Compartir'}
+            </Text>
+          </TouchableOpacity>
 
           {/* Sección de Seguimiento de Emisión / Próximo Estreno */}
           {(item.category === 'series' || item.category === 'manga') && (
@@ -646,13 +681,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </Text>
               <View style={styles.providersContainer}>
                 {providers.map(provider => {
-                  const destination = resolveDestination(provider, item);
+                  const destination = resolveDestinationTarget(provider, item);
                   return (
                     <ProviderBadge
                       key={provider.id}
                       provider={provider}
                       category={item.category}
-                      onPress={destination ? () => openUrl(destination) : undefined}
+                      onPress={destination ? () => openProviderDestination(destination) : undefined}
                     />
                   );
                 })}
@@ -787,10 +822,22 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     />
   );
 
+  const shareModal = (
+    <ShareItemModal
+      visible={isShareVisible}
+      item={item}
+      destinations={onShareToList ? shareDestinations : []}
+      showListSection={Boolean(onShareToList)}
+      onShareToList={onShareToList ?? (async () => false)}
+      onClose={() => setIsShareVisible(false)}
+    />
+  );
+
   if (embedded) {
     return (
       <>
         {modalBody}
+        {shareModal}
         <ConfirmModal
           visible={showDeleteConfirm}
           title="Eliminar obra"
@@ -811,6 +858,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
       {modalBody}
+      {shareModal}
       <ConfirmModal
         visible={showDeleteConfirm}
         title="Eliminar obra"

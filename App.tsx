@@ -22,6 +22,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AddMediaModal } from './src/components/AddMediaModal';
 import { AppFooter } from './src/components/AppFooter';
 import { AppUpdatesModal } from './src/components/AppUpdatesModal';
+import { ShareDestination } from './src/components/ShareItemModal';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
 import { ConfirmModal } from './src/components/ConfirmModal';
@@ -38,6 +39,7 @@ import { UserSearchModal } from './src/components/UserSearchModal';
 import { WelcomeLandingScreen } from './src/components/WelcomeLandingScreen';
 import { GamificationService } from './src/services/gamificationService';
 import { StorageService } from './src/services/storageService';
+import { ForbiddenError } from './src/services/mongoDbService';
 import { UpdateService } from './src/services/updateService';
 import { MediaListSkeleton, ListChipsSkeleton } from './src/components/Skeleton';
 import { ListFormModal, ListFormValues } from './src/components/ListFormModal';
@@ -322,6 +324,24 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       ? selectedList
       : homeLists.find(l => l.items.some(i => i.id === item.id));
 
+  // Otras listas del usuario (propias, en las que colabora o públicas que sigue) que aceptan su aporte.
+  const getShareDestinations = (item: MediaItem): ShareDestination[] => {
+    if (!profile) return [];
+    const sourceId = findSourceList(item)?.id;
+    return homeLists
+      .filter(
+        l =>
+          l.id !== sourceId &&
+          StorageService.canUserContribute(l, profile.id, followedListIds) &&
+          isCategoryAllowed(l, item.category)
+      )
+      .map(l => ({
+        list: l,
+        relation: l.owner.id === profile.id ? 'owner' : l.collaborators.some(c => c.id === profile.id) ? 'collaborator' : 'follower',
+        alreadyAdded: isItemInList(item, l.items),
+      }));
+  };
+
   const isFavoriteIn = (listId: string, mediaId: string) =>
     favorites.some(f => f.listId === listId && f.mediaId === mediaId);
 
@@ -569,12 +589,32 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       addedBy: { id: profile.id, name: profile.name, avatar: profile.avatar },
       addedAt: new Date().toISOString(),
     };
+    await addItemToListAndRefresh(listId, item);
+  };
+
+  /** Copia de un elemento para otra lista: obra igual, aporte nuevo del usuario actual. */
+  const handleShareItemToList = async (listId: string, source: MediaItem): Promise<boolean> => {
+    if (!profile) return false;
+    const { comments: _comments, isWatched: _isWatched, watchedAt: _watchedAt, trackingInfo: _trackingInfo, userRating: _userRating, ...work } = source;
+    const item: MediaItem = {
+      ...work,
+      id: newItemId(),
+      criticRating: source.criticRating ?? (source.averageRating > 0 ? source.averageRating : undefined),
+      addedBy: { id: profile.id, name: profile.name, avatar: profile.avatar },
+      addedAt: new Date().toISOString(),
+      comments: [],
+    };
+    return addItemToListAndRefresh(listId, item);
+  };
+
+  const addItemToListAndRefresh = async (listId: string, item: MediaItem): Promise<boolean> => {
+    if (!profile) return false;
     let updated: CollaborativeList[];
     try {
       updated = await StorageService.addMediaToList(listId, item);
     } catch (err) {
       Alert.alert('No permitido', err instanceof Error ? err.message : 'No se pudo añadir el elemento.');
-      return;
+      return false;
     }
     setLists(updated);
     if (selectedList && selectedList.id === listId) {
@@ -591,6 +631,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     const refreshedAct = await StorageService.getActivity();
     setActivities(refreshedAct);
     await refreshNotificationsCount();
+    return true;
   };
 
   const handleAddMedia = async (item: MediaItem) => {
@@ -619,7 +660,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       setSelectedList(prev => (prev ? withoutItem(prev) : prev));
       Alert.alert(
         'Error',
-        err instanceof Error && err.message.startsWith('Esta lista')
+        err instanceof ForbiddenError || (err instanceof Error && err.message.startsWith('Esta lista'))
           ? err.message
           : `No se pudo añadir «${item.title}». Revisa tu conexión e inténtalo de nuevo.`
       );
@@ -1491,6 +1532,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             return !!sourceList && isFavoriteIn(sourceList.id, selectedMedia.id);
           })()}
           onToggleFavorite={findSourceList(selectedMedia) ? handleToggleFavorite : undefined}
+          shareDestinations={getShareDestinations(selectedMedia)}
+          onShareToList={handleShareItemToList}
         />
       )}
 
@@ -1630,6 +1673,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     </SafeAreaView>
   );
 }
+
+const newItemId = () => `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
 export default function App() {
   if (CLERK_PUBLISHABLE_KEY) {

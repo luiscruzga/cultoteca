@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -12,7 +13,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { UpdateInfo } from '../types';
-import { UpdateService } from '../services/updateService';
+import { ApkDownloadProgress, UpdateService } from '../services/updateService';
+
+type DownloadPhase = 'idle' | 'downloading' | 'downloaded' | 'error';
+
+const formatMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
 
 interface AppUpdatesModalProps {
   visible: boolean;
@@ -29,6 +34,10 @@ export const AppUpdatesModal: React.FC<AppUpdatesModalProps> = ({
   const [autoUpdates, setAutoUpdates] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [downloading, setDownloading] = useState<boolean>(false);
+  const [downloadPhase, setDownloadPhase] = useState<DownloadPhase>('idle');
+  const [progress, setProgress] = useState<ApkDownloadProgress>({ writtenBytes: 0, totalBytes: 0 });
+  const [apkFileUri, setApkFileUri] = useState<string | null>(null);
+  const [installing, setInstalling] = useState<boolean>(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [hasChecked, setHasChecked] = useState<boolean>(false);
   const [lastCheckedText, setLastCheckedText] = useState<string | null>(null);
@@ -92,26 +101,156 @@ export const AppUpdatesModal: React.FC<AppUpdatesModalProps> = ({
     }
   };
 
+  const handleInstallApk = async (fileUri: string) => {
+    setInstalling(true);
+    try {
+      await UpdateService.installApk(fileUri);
+    } catch {
+      Alert.alert(
+        'Permiso necesario',
+        'Android no permitió abrir el instalador. Activa "Instalar apps desconocidas" para Cultoteca y vuelve a pulsar "Instalar actualización".',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir ajustes', onPress: () => UpdateService.openInstallPermissionSettings().catch(() => undefined) },
+        ]
+      );
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   const handleDownloadApk = async () => {
     if (!updateInfo?.apkUrl) {
       Alert.alert('Aviso', 'No hay enlace de descarga directa del APK disponible.');
       return;
     }
 
-    setDownloading(true);
+    if (Platform.OS !== 'android') {
+      setDownloading(true);
+      try {
+        await UpdateService.downloadAndInstallApk(updateInfo.apkUrl);
+      } finally {
+        setDownloading(false);
+      }
+      return;
+    }
+
+    setDownloadPhase('downloading');
+    setProgress({ writtenBytes: 0, totalBytes: 0 });
+    setApkFileUri(null);
     try {
-      await UpdateService.downloadAndInstallApk(updateInfo.apkUrl);
-    } finally {
-      setDownloading(false);
+      const fileUri = await UpdateService.downloadApk(updateInfo.apkUrl, updateInfo.latestVersion, setProgress);
+      if (!fileUri) {
+        setDownloadPhase('idle');
+        return;
+      }
+      setApkFileUri(fileUri);
+      setDownloadPhase('downloaded');
+      await handleInstallApk(fileUri);
+    } catch (error) {
+      console.warn('Error descargando la APK:', error);
+      setDownloadPhase('error');
     }
   };
 
+  const handleCancelDownload = async () => {
+    await UpdateService.cancelDownload();
+    setDownloadPhase('idle');
+  };
+
+  const handleClose = () => {
+    if (downloadPhase === 'downloading') {
+      UpdateService.cancelDownload();
+      setDownloadPhase('idle');
+    }
+    onClose();
+  };
+
+  const progressRatio = progress.totalBytes > 0 ? Math.min(progress.writtenBytes / progress.totalBytes, 1) : 0;
+
+  const renderDownloadAction = () => {
+    if (downloadPhase === 'downloading') {
+      return (
+        <View style={styles.progressBox}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressTitle}>Descargando actualización…</Text>
+            {progress.totalBytes > 0 && (
+              <Text style={styles.progressPercent}>{Math.round(progressRatio * 100)}%</Text>
+            )}
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.max(progressRatio * 100, 2)}%` }]} />
+          </View>
+          <Text style={styles.progressDetail}>
+            {progress.totalBytes > 0
+              ? `${formatMb(progress.writtenBytes)} MB de ${formatMb(progress.totalBytes)} MB`
+              : `${formatMb(progress.writtenBytes)} MB descargados`}
+          </Text>
+          <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelDownload} activeOpacity={0.8}>
+            <Text style={styles.cancelBtnText}>Cancelar descarga</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (downloadPhase === 'downloaded' && apkFileUri) {
+      return (
+        <TouchableOpacity
+          style={styles.downloadBtn}
+          onPress={() => handleInstallApk(apkFileUri)}
+          disabled={installing}
+          activeOpacity={0.8}
+        >
+          {installing ? (
+            <ActivityIndicator color="#FFF" size="small" />
+          ) : (
+            <>
+              <Ionicons name="download-outline" size={20} color="#FFF" />
+              <Text style={styles.downloadBtnText}>Instalar actualización</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <>
+        {downloadPhase === 'error' && (
+          <Text style={styles.errorText}>
+            La descarga falló o quedó incompleta. Revisa tu conexión e inténtalo de nuevo.
+          </Text>
+        )}
+        <TouchableOpacity
+          style={styles.downloadBtn}
+          onPress={handleDownloadApk}
+          disabled={downloading}
+          activeOpacity={0.8}
+        >
+          {downloading ? (
+            <ActivityIndicator color="#FFF" size="small" />
+          ) : (
+            <>
+              <Ionicons
+                name={downloadPhase === 'error' ? 'refresh-outline' : 'cloud-download-outline'}
+                size={20}
+                color="#FFF"
+              />
+              <Text style={styles.downloadBtnText}>
+                {downloadPhase === 'error' ? 'Reintentar descarga' : 'Descargar e Instalar APK'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </>
+    );
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={handleClose}>
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Cerrar">
+          <TouchableOpacity onPress={handleClose} style={styles.closeBtn} accessibilityLabel="Cerrar">
             <Ionicons name="close" size={24} color="#F8FAFC" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Versión & Actualizaciones</Text>
@@ -189,25 +328,12 @@ export const AppUpdatesModal: React.FC<AppUpdatesModalProps> = ({
                 </View>
               ) : null}
 
-              <TouchableOpacity
-                style={styles.downloadBtn}
-                onPress={handleDownloadApk}
-                disabled={downloading}
-                activeOpacity={0.8}
-              >
-                {downloading ? (
-                  <ActivityIndicator color="#FFF" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="cloud-download-outline" size={20} color="#FFF" />
-                    <Text style={styles.downloadBtnText}>Descargar e Instalar APK</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {renderDownloadAction()}
 
               <Text style={styles.downloadNotice}>
-                Android descargará el archivo .apk y te pedirá confirmar la instalación de la nueva
-                versión.
+                {Platform.OS === 'android'
+                  ? 'La actualización se descarga dentro de Cultoteca y luego Android te pedirá confirmar la instalación.'
+                  : 'Se abrirá el enlace de descarga del archivo .apk.'}
               </Text>
             </View>
           )}
@@ -418,6 +544,67 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+  },
+  progressBox: {
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  progressTitle: {
+    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  progressPercent: {
+    color: '#38BDF8',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#334155',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#38BDF8',
+  },
+  progressDetail: {
+    color: '#94A3B8',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  cancelBtn: {
+    alignSelf: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  cancelBtnText: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  errorText: {
+    color: '#F87171',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 10,
+    lineHeight: 16,
   },
   downloadNotice: {
     fontSize: 11,

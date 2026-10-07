@@ -105,6 +105,8 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
+export class ForbiddenError extends Error {}
+
 export const MongoDbService = {
   isConfigured(): boolean {
     return Boolean(API_BASE_URL);
@@ -142,6 +144,8 @@ export const MongoDbService = {
     options: {
       method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
       body?: any;
+      /** Lanza un error con el mensaje del servidor cuando rechaza la petición por permisos (403). */
+      strict?: boolean;
     } = {}
   ): Promise<T | null> {
     const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -168,12 +172,22 @@ export const MongoDbService = {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
+        if (options.strict && response.status === 403) {
+          let message = 'No tienes permiso para realizar esta acción.';
+          try {
+            message = JSON.parse(errorText)?.message || message;
+          } catch {
+            // respuesta no JSON
+          }
+          throw new ForbiddenError(message);
+        }
         console.warn(`[MongoDbService] ${options.method || 'GET'} ${path} failed (${response.status}):`, errorText);
         return null;
       }
 
       return (await response.json()) as T;
     } catch (err: any) {
+      if (err instanceof ForbiddenError) throw err;
       // Backend not running or timeout; graceful fallback to local cache
       console.warn(`[MongoDbService] Network request to ${path} failed (using offline fallback):`, err?.message || err);
       return null;
@@ -189,12 +203,26 @@ export const MongoDbService = {
     return res?.documents || null;
   },
 
-  async insertOrUpdateList(list: CollaborativeList): Promise<boolean> {
+  async insertOrUpdateList(list: CollaborativeList, options: { strict?: boolean } = {}): Promise<boolean> {
     const res = await this.request<{ success: boolean }>('/api/lists', {
       method: 'POST',
       body: list,
+      strict: options.strict,
     });
     return Boolean(res?.success);
+  },
+
+  /** Une al usuario autenticado a la lista con ese código. `undefined` si no hay conexión con el backend. */
+  async joinListByCode(
+    code: string,
+    user: { name: string; avatar?: string }
+  ): Promise<{ list: CollaborativeList | null; joined: boolean } | undefined> {
+    const res = await this.request<{ document: CollaborativeList | null; joined?: boolean }>('/api/lists/join', {
+      method: 'POST',
+      body: { code, user },
+    });
+    if (!res) return undefined;
+    return { list: res.document, joined: Boolean(res.joined) };
   },
 
   async deleteList(listId: string): Promise<boolean> {
