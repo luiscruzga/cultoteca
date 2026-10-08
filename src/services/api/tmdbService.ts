@@ -8,6 +8,7 @@ import {
   StreamingProvider,
 } from '../../types';
 import { createTimeoutController } from './requestController';
+import { providerId } from '../../utils/mediaIdentity';
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -374,6 +375,50 @@ const fetchTmdbJson = async (path: string, timeoutMs: number): Promise<any | nul
   } finally {
     clearTimeout(timeoutId);
   }
+};
+
+const trailerCache = new Map<string, Promise<string | null>>();
+
+const VIDEO_LANGUAGE_RANK: Record<string, number> = { es: 0, en: 1 };
+const VIDEO_TYPE_RANK: Record<string, number> = { Trailer: 0, Teaser: 1 };
+
+/**
+ * Clave de YouTube del trailer de una película o serie (TMDB /videos).
+ * Prioriza español sobre inglés, Trailer sobre Teaser y vídeos oficiales. Devuelve null si no hay.
+ */
+export const fetchTmdbTrailerKey = (item: MediaItem): Promise<string | null> => {
+  const match = providerId(item)?.match(/^tmdb-(movie|tv)-(\d+)$/);
+  if (!match || !isTmdbConfigured()) return Promise.resolve(null);
+
+  const cacheKey = `${match[1]}-${match[2]}`;
+  const cached = trailerCache.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = (async (): Promise<string | null> => {
+    const data = await fetchTmdbJson(
+      `/${match[1]}/${match[2]}/videos?language=es-ES&include_video_language=es,en,null`,
+      4000
+    );
+    if (!data) throw new Error('TMDB videos unavailable');
+
+    const videos = ((data.results || []) as any[]).filter(
+      v => v?.site === 'YouTube' && v.key && v.type in VIDEO_TYPE_RANK
+    );
+    videos.sort(
+      (a, b) =>
+        (VIDEO_LANGUAGE_RANK[a.iso_639_1] ?? 2) - (VIDEO_LANGUAGE_RANK[b.iso_639_1] ?? 2) ||
+        VIDEO_TYPE_RANK[a.type] - VIDEO_TYPE_RANK[b.type] ||
+        Number(Boolean(b.official)) - Number(Boolean(a.official))
+    );
+    return videos[0]?.key ?? null;
+  })().catch(() => {
+    // Error de red: se permite reintentar en la próxima apertura
+    trailerCache.delete(cacheKey);
+    return null;
+  });
+
+  trailerCache.set(cacheKey, promise);
+  return promise;
 };
 
 /** Resuelve el id de TMDB de una persona buscando por nombre (items sin ids guardados). */

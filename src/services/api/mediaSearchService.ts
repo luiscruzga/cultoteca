@@ -8,6 +8,7 @@ import { searchRecipes } from './recipeSearchService';
 import { searchPlaces } from './placeSearchService';
 import { searchBoardGames } from './boardGameSearchService';
 import { createTimeoutController, isAbortError } from './requestController';
+import { providerId } from '../../utils/mediaIdentity';
 
 // Curated library of cult titles with streaming/reading providers for instant results and offline fallback
 export const CURATED_CULT_CATALOG: MediaItem[] = [
@@ -651,6 +652,44 @@ const createAbortError = () => {
   const error = new Error('Search aborted');
   error.name = 'AbortError';
   return error;
+};
+
+const jikanTrailerCache = new Map<string, Promise<string | null>>();
+
+/**
+ * Clave de YouTube del trailer de un anime (Jikan /anime/{id}).
+ * Usa trailer.youtube_id y, si viene vacío, lo extrae de trailer.embed_url. Devuelve null si no hay.
+ */
+export const fetchJikanTrailerKey = (item: MediaItem): Promise<string | null> => {
+  const malId = providerId(item)?.match(/^jikan-(\d+)$/)?.[1];
+  if (!malId) return Promise.resolve(null);
+
+  const cached = jikanTrailerCache.get(malId);
+  if (cached) return cached;
+
+  const promise = (async (): Promise<string | null> => {
+    const { controller, timeoutId } = createTimeoutController(3500);
+    try {
+      const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}`, { signal: controller.signal });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`Jikan ${res.status}`);
+      const trailer = (await res.json())?.data?.trailer;
+      return (
+        trailer?.youtube_id ||
+        trailer?.embed_url?.match(/\/embed\/([\w-]{6,})/)?.[1] ||
+        null
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  })().catch(() => {
+    // Error de red o límite de peticiones: se permite reintentar en la próxima apertura
+    jikanTrailerCache.delete(malId);
+    return null;
+  });
+
+  jikanTrailerCache.set(malId, promise);
+  return promise;
 };
 
 const searchJikanAnime = async (cleanQuery: string, signal?: AbortSignal): Promise<MediaItem[]> => {

@@ -26,6 +26,9 @@ import { remoteImageSource } from '../utils/remoteImage';
 import { getCriticRating, getListRating } from '../utils/ratings';
 import { ProviderDestination, resolveDestinationTarget, resolveProviderLinks } from '../services/api/providerLinksService';
 import { PointsToastHost } from './PointsToast';
+import { TrailerHero } from './TrailerHero';
+import { TrailerPlayerModal } from './TrailerPlayerModal';
+import { fetchTrailerKey, hasTrailerSupport } from '../services/api/trailerService';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -125,7 +128,26 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     return () => controller.abort();
   }, [item, visible]);
 
+  // Trailer de YouTube (películas, series y anime); se descarta si llega para un item anterior.
+  const [trailer, setTrailer] = useState<{ itemId: string; key: string | null } | null>(null);
+  // Id del item cuyo trailer está abierto en grande (así no se arrastra al cambiar de obra).
+  const [trailerPlayerItemId, setTrailerPlayerItemId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!item || !visible || !hasTrailerSupport(item)) return;
+    let cancelled = false;
+    fetchTrailerKey(item).then(key => {
+      if (!cancelled) setTrailer({ itemId: item.id, key });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item, visible]);
+
   if (!item || !visible) return null;
+
+  const trailerKey = trailer?.itemId === item.id ? trailer.key : null;
+  const isTrailerPlayerVisible = Boolean(trailerKey) && trailerPlayerItemId === item.id;
 
   const providers =
     resolvedProviders?.itemId === item.id ? resolvedProviders.providers : item.whereToWatchOrRead || [];
@@ -231,6 +253,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {/* Mientras está abierto en grande se desmonta la vista previa para no duplicar audio */}
+          {trailerKey && !isTrailerPlayerVisible ? (
+            <TrailerHero
+              videoId={trailerKey}
+              title={item.title}
+              backdropUrl={item.backdropUrl}
+              posterUrl={item.posterUrl}
+              onPress={() => setTrailerPlayerItemId(item.id)}
+            />
+          ) : null}
+
           {/* Main Info Hero */}
           <View style={styles.heroSection}>
             <TouchableOpacity
@@ -817,6 +850,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     />
   );
 
+  const trailerPlayer = (
+    <TrailerPlayerModal
+      videoId={trailerKey}
+      title={item.title}
+      visible={isTrailerPlayerVisible}
+      onClose={() => setTrailerPlayerItemId(null)}
+    />
+  );
+
   const personModal = selectedPerson && (
     <PersonDetailModal
       key={selectedPerson.id ?? selectedPerson.name}
@@ -856,6 +898,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         />
         {personModal}
         {imageViewer}
+        {trailerPlayer}
       </>
     );
   }
@@ -878,6 +921,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       />
       {personModal}
       {imageViewer}
+      {trailerPlayer}
     </Modal>
   );
 };
