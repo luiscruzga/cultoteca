@@ -1,6 +1,6 @@
 {
   "name": "cultoteca",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "index.ts",
   "dependencies": {
     "@clerk/clerk-expo": "^2.20.1",

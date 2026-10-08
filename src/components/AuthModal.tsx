@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
-  KeyboardAvoidingView,
+  LayoutChangeEvent,
   Modal,
   Platform,
   ScrollView,
@@ -24,6 +24,7 @@ import { PlatformSubscriptionsEditor } from './PlatformSubscriptionsEditor';
 import { ProviderBadge } from './ProviderBadge';
 import { UpdateService } from '../services/updateService';
 import { remoteImageSource } from '../utils/remoteImage';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 
 // Safely try importing Clerk hooks if configured
 const AUTH_UNAVAILABLE_MESSAGE = 'El inicio de sesión no está disponible: la autenticación (Clerk) no está configurada.';
@@ -152,6 +153,46 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isAvatarPickerVisible, setIsAvatarPickerVisible] = useState(false);
   const [isEditingPlatforms, setIsEditingPlatforms] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+
+  // Keep the focused field visible above the keyboard (Android edge-to-edge doesn't resize the window)
+  const keyboardHeight = useKeyboardHeight();
+  const scrollRef = useRef<ScrollView>(null);
+  const formY = useRef(0);
+  const fieldY = useRef<Record<string, number>>({});
+  const focusedField = useRef<string | null>(null);
+
+  const scrollToField = useCallback((key: string) => {
+    const y = fieldY.current[key];
+    if (y === undefined) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, formY.current + y - 40), animated: true });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (keyboardHeight > 0 && focusedField.current) {
+      scrollToField(focusedField.current);
+    }
+  }, [keyboardHeight, scrollToField]);
+
+  const onFormLayout = (e: LayoutChangeEvent) => {
+    formY.current = e.nativeEvent.layout.y;
+  };
+  const trackField = (key: string) => ({
+    onLayout: (e: LayoutChangeEvent) => {
+      fieldY.current[key] = e.nativeEvent.layout.y;
+    },
+  });
+  const focusField = (key: string) => ({
+    onFocus: () => {
+      focusedField.current = key;
+      scrollToField(key);
+    },
+    onBlur: () => {
+      if (focusedField.current === key) focusedField.current = null;
+    },
+  });
 
   const [friendsList, setFriendsList] = useState<UserProfile[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -621,16 +662,13 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.modalOverlay}
-      >
+      <View style={[styles.modalOverlay, { paddingBottom: keyboardHeight }]}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
           onPress={onClose}
         />
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, keyboardHeight > 0 && styles.modalContentKeyboardOpen]}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleContainer}>
@@ -648,7 +686,12 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
             )}
           </View>
 
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* Status Clerk Banner */}
             {!isClerkConfigured && (
               <View style={styles.devBanner}>
@@ -950,11 +993,13 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
               </View>
             ) : secondFactor ? (
               // Sign-in second factor (MFA or new-device verification)
-              <View>
+              <View onLayout={onFormLayout}>
                 <Text style={styles.sectionSubtitle}>
                   {SECOND_FACTOR_PROMPTS[secondFactor.strategy](secondFactor.target)}
                 </Text>
                 <TextInput
+                  {...trackField('secondFactorCode')}
+                  {...focusField('secondFactorCode')}
                   style={styles.input}
                   placeholder="Código de verificación"
                   placeholderTextColor="#8E8E93"
@@ -1001,11 +1046,13 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
               </View>
             ) : pendingVerification ? (
               // Code Verification
-              <View>
+              <View onLayout={onFormLayout}>
                 <Text style={styles.sectionSubtitle}>
                   Ingresa el código de 6 dígitos que Clerk envió a {email}:
                 </Text>
                 <TextInput
+                  {...trackField('codeVerification')}
+                  {...focusField('codeVerification')}
                   style={styles.input}
                   placeholder="Código de verificación"
                   placeholderTextColor="#8E8E93"
@@ -1038,7 +1085,7 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
               </View>
             ) : (
               // Sign In or Sign Up Form
-              <View>
+              <View onLayout={onFormLayout}>
                 <View style={styles.tabsRow}>
                   <TouchableOpacity
                     style={[styles.tabBtn, mode === 'signin' && styles.tabBtnActive]}
@@ -1072,6 +1119,8 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                   <>
                     <Text style={styles.inputLabel}>Nombre completo</Text>
                     <TextInput
+                      {...trackField('name')}
+                      {...focusField('name')}
                       style={styles.input}
                       placeholder="Ej. Sofía Morales"
                       placeholderTextColor="#636366"
@@ -1080,6 +1129,8 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                     />
                     <Text style={styles.inputLabel}>Usuario / Handle</Text>
                     <TextInput
+                      {...trackField('handle')}
+                      {...focusField('handle')}
                       style={styles.input}
                       placeholder="Ej. @sofia_cine"
                       placeholderTextColor="#636366"
@@ -1092,6 +1143,8 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
 
                 <Text style={styles.inputLabel}>Correo electrónico</Text>
                 <TextInput
+                  {...trackField('email')}
+                  {...focusField('email')}
                   style={styles.input}
                   placeholder="tu@correo.com"
                   placeholderTextColor="#636366"
@@ -1102,14 +1155,32 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
                 />
 
                 <Text style={styles.inputLabel}>Contraseña</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="••••••••"
-                  placeholderTextColor="#636366"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
+                <View {...trackField('password')} style={styles.passwordRow}>
+                  <TextInput
+                    {...focusField('password')}
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="••••••••"
+                    placeholderTextColor="#636366"
+                    secureTextEntry={!isPasswordVisible}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    value={password}
+                    onChangeText={setPassword}
+                  />
+                  <TouchableOpacity
+                    style={styles.passwordToggle}
+                    onPress={() => setIsPasswordVisible((v) => !v)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={isPasswordVisible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  >
+                    <Ionicons
+                      name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+                      size={20}
+                      color="#8E8E93"
+                    />
+                  </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity
                   style={styles.primaryBtn}
@@ -1143,7 +1214,7 @@ const AuthModalContent: React.FC<AuthModalContentProps> = ({
             </TouchableOpacity>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       {/* Custom Logout Confirmation Dialog */}
       <ConfirmModal
@@ -1194,6 +1265,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: '90%',
     paddingBottom: 34,
+  },
+  modalContentKeyboardOpen: {
+    paddingBottom: 0,
   },
   header: {
     flexDirection: 'row',
@@ -1469,6 +1543,19 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 15,
     marginBottom: 14,
+  },
+  passwordRow: {
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    paddingRight: 48,
+  },
+  passwordToggle: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 14,
+    justifyContent: 'center',
   },
   primaryBtn: {
     backgroundColor: '#E50914',
