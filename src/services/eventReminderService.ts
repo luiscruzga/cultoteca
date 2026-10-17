@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { MediaItem } from '../types';
+import { CollaborativeList, MediaItem } from '../types';
 import { ANDROID_CHANNEL_ID, Notifications, requestNotificationPermissions } from './notificationService';
 import { formatEventDateShort } from '../utils/eventDates';
 
@@ -143,4 +143,44 @@ export const cancelEventReminders = async (userId: string, itemId: string): Prom
   await cancelNotifications(entry.notificationIds);
   delete store[userId][itemId];
   await writeStore(store);
+};
+
+/** Reprograma, con los mismos minutos, los avisos guardados de un evento cuya fecha cambió. */
+export const rescheduleEventReminders = async (
+  userId: string,
+  item: Pick<MediaItem, 'id' | 'title' | 'eventStartsAt' | 'eventAllDay' | 'eventLocation'>,
+  listId?: string
+): Promise<void> => {
+  const store = await readStore();
+  const entry = store[userId]?.[item.id];
+  if (!entry || entry.eventStartsAt === (item.eventStartsAt ?? '')) return;
+  await setEventReminders(userId, item, entry.offsetsMinutes, listId);
+};
+
+/**
+ * Alinea los avisos guardados con las listas cargadas: cancela los de eventos que ya no existen y
+ * reprograma los de eventos cuya fecha cambió (p. ej. editada por quien lo publicó).
+ */
+export const syncEventReminders = async (userId: string, lists: CollaborativeList[]): Promise<void> => {
+  const store = await readStore();
+  const entries = store[userId];
+  if (!entries || Object.keys(entries).length === 0) return;
+  const found = new Map<string, { item: MediaItem; listId: string }>();
+  for (const list of lists) {
+    for (const item of list.items) {
+      if (item.category === 'event' && !found.has(item.id)) found.set(item.id, { item, listId: list.id });
+    }
+  }
+  for (const [itemId, entry] of Object.entries(entries)) {
+    const match = found.get(itemId);
+    try {
+      if (!match) {
+        await cancelEventReminders(userId, itemId);
+      } else if ((match.item.eventStartsAt ?? '') !== entry.eventStartsAt) {
+        await setEventReminders(userId, match.item, entry.offsetsMinutes, match.listId);
+      }
+    } catch (error) {
+      console.warn(`[eventReminders] No se pudo sincronizar el evento ${itemId}:`, error);
+    }
+  }
 };

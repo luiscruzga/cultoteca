@@ -537,6 +537,8 @@ export interface LinkEventParams {
   endsAt?: string;
   allDay?: boolean;
   location?: string;
+  /** Ocultar de la lista cuando el evento haya pasado. */
+  hideWhenPast?: boolean;
 }
 
 export function buildLinkMediaItem(params: {
@@ -588,6 +590,7 @@ export function buildLinkMediaItem(params: {
           eventEndsAt: event.endsAt,
           eventAllDay: Boolean(event.allDay),
           eventLocation: event.location?.trim() || undefined,
+          eventHideWhenPast: Boolean(event.hideWhenPast),
         }
       : {}),
     averageRating: userRating || 0,

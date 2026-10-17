@@ -113,6 +113,7 @@ export interface MediaItem {
   eventEndsAt?: string; // Fin del evento (ISO), opcional
   eventAllDay?: boolean; // Evento de día completo (sin hora)
   eventLocation?: string; // Lugar del evento
+  eventHideWhenPast?: boolean; // Ocultar de la lista cuando el evento ya pasó
   isManualEntry: boolean;
   isWatched?: boolean;
   watchedAt?: string;

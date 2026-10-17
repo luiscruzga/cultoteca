@@ -51,6 +51,8 @@ interface MediaDetailModalProps {
   embedded?: boolean;
   listOwnerId?: string;
   onDeleteItem?: (mediaId: string) => void;
+  /** Editar el elemento; solo se ofrece al dueño de la lista o a quien lo publicó. */
+  onEditItem?: (item: MediaItem) => void;
   isFavorite?: boolean;
   onToggleFavorite?: (item: MediaItem) => void;
   onToggleTrackingNotification?: (item: MediaItem) => void;
@@ -106,6 +108,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   embedded = false,
   listOwnerId,
   onDeleteItem,
+  onEditItem,
   isFavorite = false,
   onToggleFavorite,
   onToggleTrackingNotification,
@@ -196,12 +199,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const getCastMember = (name: string): CastMember =>
     item.castMembers?.find(member => member.name === name) || { name };
 
-  const canDelete = Boolean(
-    onDeleteItem &&
-    currentUser?.id &&
-    item &&
-    (currentUser.id === item.addedBy?.id || currentUser.id === listOwnerId)
+  const isItemManager = Boolean(
+    currentUser?.id && item && (currentUser.id === item.addedBy?.id || currentUser.id === listOwnerId)
   );
+  const canDelete = Boolean(onDeleteItem) && isItemManager;
+  const canEdit = Boolean(onEditItem) && isItemManager;
 
   const handleDeletePress = () => {
     if (!item || !onDeleteItem) return;
@@ -276,6 +278,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               />
             </TouchableOpacity>
           )}
+          {canEdit ? (
+            <TouchableOpacity
+              onPress={() => onEditItem?.(item)}
+              style={styles.editBtn}
+              accessibilityLabel="Editar elemento"
+            >
+              <Ionicons name="pencil-outline" size={20} color="#38BDF8" />
+            </TouchableOpacity>
+          ) : null}
           {canDelete ? (
             <TouchableOpacity
               onPress={handleDeletePress}
@@ -436,6 +447,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 <View style={styles.eventMetaRow}>
                   <Ionicons name="location-outline" size={14} color="#94A3B8" />
                   <Text style={styles.eventMetaText}>{item.eventLocation}</Text>
+                </View>
+              ) : null}
+              {item.eventHideWhenPast ? (
+                <View style={styles.eventMetaRow}>
+                  <Ionicons name="eye-off-outline" size={14} color="#94A3B8" />
+                  <Text style={styles.eventMetaText}>
+                    {eventCountdown?.isPast
+                      ? 'Finalizado: solo aparece en «Eventos pasados» de la lista.'
+                      : 'Se ocultará de la lista cuando termine.'}
+                  </Text>
                 </View>
               ) : null}
               <TouchableOpacity
@@ -1083,6 +1104,12 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 20,
     backgroundColor: '#1E293B',
+  },
+  editBtn: {
+    padding: 8,
+    marginRight: 4,
+    borderRadius: 20,
+    backgroundColor: '#0284C720',
   },
   deleteBtn: {
     padding: 8,

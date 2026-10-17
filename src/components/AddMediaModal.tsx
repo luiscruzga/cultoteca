@@ -15,6 +15,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { MIN_SEARCH_QUERY_LENGTH, searchMedia } from '../services/api/mediaSearchService';
+import { EventSearchLocation, searchEvents } from '../services/api/eventSearchService';
+import { getCurrentDeviceLocation } from '../services/locationService';
+import { formatEventDateShort } from '../utils/eventDates';
+import { EventAddOptions, EventAddOptionsSheet } from './EventAddOptionsSheet';
+import { EventLocationBar, EventLocationStatus } from './EventLocationBar';
 import { isAbortError } from '../services/api/requestController';
 import { enrichTmdbItem, isTmdbSearchItem } from '../services/api/tmdbService';
 import { resolveProviderLinks } from '../services/api/providerLinksService';
@@ -79,6 +84,7 @@ const CATEGORIES: { key: MediaCategory; label: string; icon: string }[] = [
 interface SearchInputFieldProps {
   value: string;
   isSearching: boolean;
+  placeholder?: string;
   onChangeText: (text: string) => void;
   onSubmitEditing: () => void;
   onClear: () => void;
@@ -88,7 +94,7 @@ interface SearchInputFieldProps {
 // dialog window flags (ReactModalHostView.updateProperties), which closes the keyboard and blurs
 // the input right after it is tapped.
 const SearchInputField = React.forwardRef<TextInput, SearchInputFieldProps>(
-  ({ value, isSearching, onChangeText, onSubmitEditing, onClear }, ref) => {
+  ({ value, isSearching, placeholder, onChangeText, onSubmitEditing, onClear }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
     return (
       <View style={[styles.searchInputContainer, isFocused && styles.searchInputContainerFocused]}>
@@ -101,7 +107,7 @@ const SearchInputField = React.forwardRef<TextInput, SearchInputFieldProps>(
         <TextInput
           ref={ref}
           style={styles.searchInput}
-          placeholder="Busca película, anime, libro, manga..."
+          placeholder={placeholder ?? 'Busca película, anime, libro, manga...'}
           placeholderTextColor="#64748B"
           value={value}
           onChangeText={onChangeText}
@@ -201,6 +207,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   const [previewItem, setPreviewItem] = useState<MediaItem | null>(null);
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const previewIdRef = useRef<string | null>(null);
+  // Búsqueda de eventos: ubicación elegida, estado del permiso y respuesta del backend
+  const [eventLocation, setEventLocation] = useState<EventSearchLocation | null>(null);
+  const [eventLocationStatus, setEventLocationStatus] = useState<EventLocationStatus>('idle');
+  const [eventSearchStatus, setEventSearchStatus] = useState<{ configured: boolean; error?: string } | null>(null);
+  // Evento elegido en la búsqueda a la espera de avisos y "ocultar al pasar"
+  const [pendingEventItem, setPendingEventItem] = useState<MediaItem | null>(null);
 
   // Los proveedores y el reparto de TMDB se piden solo al abrir el detalle
   const openPreview = (item: MediaItem) => {
@@ -255,13 +267,28 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     searchAbortRef.current = null;
   };
 
-  const executeSearch = async (text: string, category: MediaCategory | 'all', requestId: number) => {
+  const executeSearch = async (
+    text: string,
+    category: MediaCategory | 'all',
+    requestId: number,
+    near: EventSearchLocation | null
+  ) => {
     const controller = new AbortController();
     searchAbortRef.current = controller;
     try {
+      if (category === 'event') {
+        // Directo al proveedor de eventos para saber si el backend lo tiene configurado
+        const result = await searchEvents(text, { limit: 12, near: near ?? undefined, signal: controller.signal });
+        if (requestId === currentRequestIdRef.current) {
+          setSearchResults(result.items);
+          setEventSearchStatus({ configured: result.configured, error: result.error });
+        }
+        return;
+      }
       const results = await searchMedia(text, {
         category,
         categories: isRestricted ? searchableCategories : undefined,
+        near: near ?? undefined,
         signal: controller.signal,
       });
       if (requestId === currentRequestIdRef.current) {
@@ -282,14 +309,18 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   const handleSearch = (
     text: string,
     categoryToUse?: MediaCategory | 'all',
-    immediate: boolean = false
+    immediate: boolean = false,
+    nearOverride?: EventSearchLocation | null
   ) => {
     setSearchQuery(text);
     const cat = categoryToUse !== undefined ? categoryToUse : selectedCategory;
+    const near = nearOverride !== undefined ? nearOverride : eventLocation;
 
     cancelPendingSearch();
 
-    if (text.trim().length < MIN_SEARCH_QUERY_LENGTH) {
+    // Eventos con ubicación: sin texto se listan los próximos eventos cercanos
+    const allowsEmptyQuery = cat === 'event' && Boolean(near);
+    if (text.trim().length < MIN_SEARCH_QUERY_LENGTH && !allowsEmptyQuery) {
       currentRequestIdRef.current += 1;
       setSearchResults([]);
       setIsSearching(false);
@@ -299,13 +330,29 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     setIsSearching(true);
     const requestId = ++currentRequestIdRef.current;
     if (immediate) {
-      executeSearch(text.trim(), cat, requestId);
+      executeSearch(text.trim(), cat, requestId, near);
       return;
     }
     searchTimeoutRef.current = setTimeout(() => {
       searchTimeoutRef.current = null;
-      executeSearch(text.trim(), cat, requestId);
+      executeSearch(text.trim(), cat, requestId, near);
     }, SEARCH_DEBOUNCE_MS);
+  };
+
+  const applyEventLocation = (near: EventSearchLocation | null) => {
+    setEventLocation(near);
+    setEventLocationStatus('idle');
+    handleSearch(searchQuery, 'event', true, near);
+  };
+
+  const handleUseDeviceLocation = async () => {
+    setEventLocationStatus('locating');
+    const result = await getCurrentDeviceLocation();
+    if (result.status === 'ok') {
+      applyEventLocation(result.location);
+      return;
+    }
+    setEventLocationStatus(result.status);
   };
 
   // Link tab state
@@ -429,7 +476,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       userRating: linkRating,
       event:
         linkSaveAs === 'event' && eventIso
-          ? { startsAt: eventIso, allDay: eventSchedule.allDay, location: eventSchedule.location }
+          ? {
+              startsAt: eventIso,
+              allDay: eventSchedule.allDay,
+              location: eventSchedule.location,
+              hideWhenPast: eventSchedule.hideWhenPast,
+            }
           : undefined,
     });
 
@@ -451,17 +503,34 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   const [manualPlatform, setManualPlatform] = useState('Netflix');
   const [manualPoster, setManualPoster] = useState('');
 
+  const buildListItem = (item: MediaItem): MediaItem => ({
+    ...item,
+    // The provider score is the critic rating; list users' ratings are tracked separately.
+    criticRating: item.criticRating ?? (item.averageRating > 0 ? item.averageRating : undefined),
+    sourceId: item.sourceId ?? item.id,
+    id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    addedBy: currentUser,
+    addedAt: new Date().toISOString(),
+  });
+
   const handleSelectApiItem = (item: MediaItem) => {
-    const enrichedItem: MediaItem = {
-      ...item,
-      // The provider score is the critic rating; list users' ratings are tracked separately.
-      criticRating: item.criticRating ?? (item.averageRating > 0 ? item.averageRating : undefined),
-      sourceId: item.sourceId ?? item.id,
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      addedBy: currentUser,
-      addedAt: new Date().toISOString(),
-    };
-    onAddMedia(enrichedItem);
+    // Los eventos piden antes los avisos y si se ocultan al pasar
+    if (item.category === 'event') {
+      setPendingEventItem(item);
+      return;
+    }
+    onAddMedia(buildListItem(item));
+    handleClose();
+  };
+
+  const handleConfirmEventAdd = ({ reminderOffsets: offsets, hideWhenPast }: EventAddOptions) => {
+    if (!pendingEventItem) return;
+    const item: MediaItem = { ...buildListItem(pendingEventItem), eventHideWhenPast: hideWhenPast };
+    onAddMedia(item);
+    setEventReminders(currentUser.id, item, offsets, listId).catch(err =>
+      console.warn('[AddMediaModal] No se pudieron programar los avisos:', err)
+    );
+    setPendingEventItem(null);
     handleClose();
   };
 
@@ -492,6 +561,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
             eventStartsAt: eventIso!,
             eventAllDay: eventSchedule.allDay,
             eventLocation: eventSchedule.location.trim() || undefined,
+            eventHideWhenPast: eventSchedule.hideWhenPast,
           }
         : {}),
       synopsis: manualSynopsis.trim() || 'Sin descripción ingresada.',
@@ -524,6 +594,8 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     setIsSearching(false);
     setSearchQuery('');
     setSearchResults([]);
+    setEventSearchStatus(null);
+    setPendingEventItem(null);
     closePreview();
     setLinkUrl('');
     setIsFetchingPreview(false);
@@ -616,7 +688,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                   style={[styles.catPill, selectedCategory === cat.key && styles.activeCatPill]}
                   onPress={() => {
                     setSelectedCategory(cat.key);
-                    if (searchQuery.trim()) handleSearch(searchQuery, cat.key, true);
+                    if (searchQuery.trim() || (cat.key === 'event' && eventLocation)) handleSearch(searchQuery, cat.key, true);
                   }}
                 >
                   <Ionicons
@@ -662,11 +734,22 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
               </View>
             )}
 
+            {selectedCategory === 'event' ? (
+              <EventLocationBar
+                location={eventLocation}
+                status={eventLocationStatus}
+                onUseDeviceLocation={handleUseDeviceLocation}
+                onSubmitCity={city => applyEventLocation({ city })}
+                onClear={() => applyEventLocation(null)}
+              />
+            ) : null}
+
             {/* Search Input */}
             <SearchInputField
               ref={searchInputRef}
               value={searchQuery}
               isSearching={isSearching}
+              placeholder={selectedCategory === 'event' ? 'Busca conciertos, stand up, teatro...' : undefined}
               onChangeText={text => handleSearch(text)}
               onSubmitEditing={() => handleSearch(searchQuery, undefined, true)}
               onClear={() => handleSearch('')}
@@ -685,12 +768,28 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                 keyboardShouldPersistTaps="handled"
                 ListEmptyComponent={
                   <View style={styles.emptyContainer}>
-                    <Ionicons name="compass-outline" size={48} color="#475569" />
+                    <Ionicons name={selectedCategory === 'event' ? 'calendar-outline' : 'compass-outline'} size={48} color="#475569" />
                     <Text style={styles.emptyTitle}>
-                      {searchQuery ? 'Sin resultados para esa búsqueda' : 'Escribe para buscar'}
+                      {selectedCategory === 'event'
+                        ? eventSearchStatus && !eventSearchStatus.configured
+                          ? 'Búsqueda de eventos no disponible'
+                          : eventSearchStatus?.error === 'place_not_found'
+                          ? 'No encontramos esa ciudad'
+                          : eventSearchStatus?.error === 'backend_unavailable'
+                          ? 'No se pudo contactar con el servidor'
+                          : searchQuery || eventLocation
+                          ? 'Sin eventos para esa búsqueda'
+                          : 'Busca eventos cercanos'
+                        : searchQuery
+                        ? 'Sin resultados para esa búsqueda'
+                        : 'Escribe para buscar'}
                     </Text>
                     <Text style={styles.emptySubtitle}>
-                      Consulta catálogos globales de streaming, series, libros y anime.
+                      {selectedCategory === 'event'
+                        ? eventSearchStatus && !eventSearchStatus.configured
+                          ? 'La búsqueda de eventos no está configurada en el servidor. Puedes agregar un evento desde las pestañas Enlace o Manual.'
+                          : 'Escribe un nombre (p. ej. stand up) o toca «Cerca de mí» para ver los próximos eventos a tu alrededor.'
+                        : 'Consulta catálogos globales de streaming, series, libros y anime.'}
                     </Text>
                   </View>
                 }
@@ -705,9 +804,16 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                       <Text style={styles.resultTitle} numberOfLines={2}>
                         {item.title}
                       </Text>
-                      <Text style={styles.resultMeta} numberOfLines={1}>
-                        {item.year ? `${item.year} • ` : ''}{item.category.toUpperCase()}
-                      </Text>
+                      {item.category === 'event' && item.eventStartsAt ? (
+                        <Text style={styles.resultEventMeta} numberOfLines={2}>
+                          📅 {formatEventDateShort(item.eventStartsAt, item.eventAllDay)}
+                          {item.eventLocation ? ` · ${item.eventLocation}` : ''}
+                        </Text>
+                      ) : (
+                        <Text style={styles.resultMeta} numberOfLines={1}>
+                          {item.year ? `${item.year} • ` : ''}{item.category.toUpperCase()}
+                        </Text>
+                      )}
                       {item.director ? (
                         <Text style={styles.resultDirector} numberOfLines={1}>
                           {item.director.includes(':')
@@ -1140,6 +1246,13 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
           </ScrollView>
         )}
 
+        <EventAddOptionsSheet
+          visible={Boolean(pendingEventItem)}
+          item={pendingEventItem}
+          onConfirm={handleConfirmEventAdd}
+          onClose={() => setPendingEventItem(null)}
+        />
+
         {previewItem && (
           <MediaDetailModal
             item={previewItem}
@@ -1385,6 +1498,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94A3B8',
     marginBottom: 2,
+  },
+  resultEventMeta: {
+    fontSize: 12,
+    color: '#FDA4AF',
+    fontWeight: '600',
+    marginBottom: 4,
   },
   resultDirector: {
     fontSize: 11,

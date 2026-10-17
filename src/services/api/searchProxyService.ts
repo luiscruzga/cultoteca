@@ -7,7 +7,7 @@ import { MongoDbService } from '../mongoDbService';
  * para que cada categoría siga con sus proveedores sin clave.
  */
 
-export type SearchProxyEndpoint = 'boardgames' | 'places';
+export type SearchProxyEndpoint = 'boardgames' | 'places' | 'events';
 
 export interface SearchProxyResponse<T> {
   configured: boolean;

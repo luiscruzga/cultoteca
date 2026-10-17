@@ -10,9 +10,17 @@ export interface EventScheduleValue {
   time: TimeValue | null;
   allDay: boolean;
   location: string;
+  /** Ocultar el evento de la lista cuando ya haya pasado. */
+  hideWhenPast: boolean;
 }
 
-export const EMPTY_EVENT_SCHEDULE: EventScheduleValue = { date: null, time: null, allDay: false, location: '' };
+export const EMPTY_EVENT_SCHEDULE: EventScheduleValue = {
+  date: null,
+  time: null,
+  allDay: false,
+  location: '',
+  hideWhenPast: true,
+};
 
 /** ISO (UTC) de la fecha elegida, o null si falta la fecha (o la hora sin "todo el día"). */
 export const scheduleToIso = (value: EventScheduleValue): string | null => {
@@ -31,15 +39,37 @@ export const scheduleToIso = (value: EventScheduleValue): string | null => {
 };
 
 /** Valor del formulario a partir de una fecha detectada en la publicación. */
-export const isoToSchedule = (iso: string, hasTime: boolean, location = ''): EventScheduleValue => {
+export const isoToSchedule = (iso: string, hasTime: boolean, location = '', hideWhenPast = true): EventScheduleValue => {
   const d = new Date(iso);
   return {
     date: new Date(d.getFullYear(), d.getMonth(), d.getDate()),
     time: hasTime ? { h: d.getHours(), m: d.getMinutes() } : null,
     allDay: !hasTime,
     location,
+    hideWhenPast,
   };
 };
+
+interface HideWhenPastSwitchProps {
+  value: boolean;
+  onChange: (value: boolean) => void;
+}
+
+/** Interruptor "Ocultar de la lista cuando pase"; se reutiliza al agregar un evento encontrado en la búsqueda. */
+export const HideWhenPastSwitch: React.FC<HideWhenPastSwitchProps> = ({ value, onChange }) => (
+  <View style={styles.switchRow}>
+    <View style={styles.switchTextBlock}>
+      <Text style={styles.switchLabel}>Ocultar de la lista cuando pase</Text>
+      <Text style={styles.switchHint}>Seguirá disponible en «Eventos pasados».</Text>
+    </View>
+    <Switch
+      value={value}
+      onValueChange={onChange}
+      trackColor={{ false: '#334155', true: '#0284C7' }}
+      thumbColor={value ? '#38BDF8' : '#94A3B8'}
+    />
+  </View>
+);
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -129,6 +159,8 @@ export const EventScheduleFields: React.FC<EventScheduleFieldsProps> = ({ value,
         onChangeText={location => onChange({ ...value, location })}
       />
 
+      <HideWhenPastSwitch value={value.hideWhenPast} onChange={hideWhenPast => onChange({ ...value, hideWhenPast })} />
+
       <CalendarPickerModal
         visible={isCalendarOpen}
         value={value.date}
@@ -214,10 +246,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
   },
+  switchTextBlock: {
+    flex: 1,
+    paddingRight: 12,
+  },
   switchLabel: {
     color: '#CBD5E1',
     fontSize: 13,
     fontWeight: '600',
+  },
+  switchHint: {
+    color: '#64748B',
+    fontSize: 11,
+    marginTop: 2,
   },
   hint: {
     color: '#64748B',

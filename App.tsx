@@ -25,7 +25,9 @@ import { AppUpdatesModal } from './src/components/AppUpdatesModal';
 import { ShareDestination } from './src/components/ShareItemModal';
 import { ShareTargetListPickerModal } from './src/components/ShareTargetListPickerModal';
 import { extractFirstUrl } from './src/services/api/linkPreviewService';
-import { cancelEventReminders } from './src/services/eventReminderService';
+import { cancelEventReminders, rescheduleEventReminders, syncEventReminders } from './src/services/eventReminderService';
+import { EditMediaItemModal } from './src/components/EditMediaItemModal';
+import { EditableItemFields } from './src/utils/itemPermissions';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
@@ -53,6 +55,7 @@ import { LIST_CONTENT_TYPES, describeAllowedCategories, getAllowedCategories, is
 import { ItemSortMode, sortItems } from './src/utils/ratings';
 import { remoteImageSource } from './src/utils/remoteImage';
 import { isSamePlatform } from './src/utils/platformLogos';
+import { isPastEvent } from './src/utils/eventDates';
 import { HomeFeed } from './src/components/HomeFeed';
 import { buildHomeFeed } from './src/services/homeFeedService';
 import {
@@ -108,10 +111,14 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [selectedList, setSelectedList] = useState<CollaborativeList | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<MediaCategory | 'all'>('all');
   const [platformFilter, setPlatformFilter] = useState<string>('all');
+  // Vista "Eventos pasados" de la lista activa; se guarda con el id de lista para no arrastrarla a otra.
+  const [pastEventsView, setPastEventsView] = useState<{ listId: string; active: boolean }>({ listId: '', active: false });
 
   // Modal States
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [isDetailVisible, setIsDetailVisible] = useState(false);
+  // Elemento abierto en el formulario de edición (dueño de la lista o quien lo publicó).
+  const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [isAddVisible, setIsAddVisible] = useState(false);
   const [isRouletteVisible, setIsRouletteVisible] = useState(false);
   const [isBadgesVisible, setIsBadgesVisible] = useState(false);
@@ -254,6 +261,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       ]);
       setLists(freshLists);
       setFollowedListIds(freshFollowed);
+      if (profile) syncEventReminders(profile.id, freshLists).catch(() => undefined);
       setSelectedList(prev => {
         if (prev) {
           const fresh = freshLists.find(l => l.id === prev.id);
@@ -595,6 +603,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       setFollowedListIds(storedFollowed);
       setActivities(storedActivity);
       setSelectedList(pickInitialList(storedLists, newUser.id, storedFollowed));
+      syncEventReminders(newUser.id, storedLists).catch(() => undefined);
       setProfile(prev => (prev && prev.id === newUser.id ? { ...prev, followedLists: storedFollowed } : prev));
       setListsLoadedFor(newUser.id);
     } catch (e) {
@@ -680,6 +689,26 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       cancelEventReminders(profile.id, mediaId).catch(() => undefined);
     }
     await refreshNotificationsCount();
+  };
+
+  const handleSaveItemEdit = async (changes: Partial<EditableItemFields>) => {
+    if (!editingItem || !profile) return;
+    const sourceList = findSourceList(editingItem) ?? selectedList;
+    if (!sourceList) throw new Error('No se encontró la lista del elemento.');
+    const updated = await StorageService.updateMediaItem(sourceList.id, editingItem.id, changes, {
+      id: profile.id,
+      name: profile.name,
+    });
+    setLists(updated);
+    const target = updated.find(l => l.id === sourceList.id);
+    const updatedItem = target?.items.find(i => i.id === editingItem.id);
+    if (target && selectedList?.id === target.id) setSelectedList(target);
+    if (updatedItem) {
+      setSelectedMedia(prev => (prev && prev.id === updatedItem.id ? updatedItem : prev));
+      if (updatedItem.category === 'event' && changes.eventStartsAt !== undefined) {
+        rescheduleEventReminders(profile.id, updatedItem, sourceList.id).catch(() => undefined);
+      }
+    }
   };
 
   const handleDeleteList = async () => {
@@ -896,23 +925,32 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   // A filter left over from another list may not be allowed in this one.
   const activeCategoryFilter =
     categoryFilter === 'all' || isCategoryAllowed(selectedList, categoryFilter) ? categoryFilter : 'all';
-  const filteredItems = selectedList
-    ? sortItems(
-        selectedList.items.filter(item => {
+  const matchesItemQuery = (item: MediaItem) =>
+    !normalizedItemQuery ||
+    item.title.toLowerCase().includes(normalizedItemQuery) ||
+    (item.director?.toLowerCase().includes(normalizedItemQuery) ?? false) ||
+    item.genres.some(g => g.toLowerCase().includes(normalizedItemQuery));
+  // Eventos ya celebrados: los marcados para ocultarse salen de la vista normal y todos se ven en "Eventos pasados".
+  const pastEvents = selectedList ? selectedList.items.filter(item => isPastEvent(item)) : [];
+  const isHiddenPastEvent = (item: MediaItem) => item.eventHideWhenPast === true && isPastEvent(item);
+  const showPastEvents = Boolean(selectedList) && pastEventsView.listId === selectedList?.id && pastEventsView.active && pastEvents.length > 0;
+  const visibleListItems = selectedList ? selectedList.items.filter(item => !isHiddenPastEvent(item)) : [];
+  const filteredItems = !selectedList
+    ? []
+    : showPastEvents
+    ? pastEvents
+        .filter(matchesItemQuery)
+        .sort((a, b) => (b.eventStartsAt ?? '').localeCompare(a.eventStartsAt ?? ''))
+    : sortItems(
+        visibleListItems.filter(item => {
           const matchesCategory = activeCategoryFilter === 'all' || item.category === activeCategoryFilter;
           const matchesPlatform =
             platformFilter === 'all' ||
             item.whereToWatchOrRead.some(p => p.name.toLowerCase().includes(platformFilter.toLowerCase()));
-          const matchesQuery =
-            !normalizedItemQuery ||
-            item.title.toLowerCase().includes(normalizedItemQuery) ||
-            (item.director?.toLowerCase().includes(normalizedItemQuery) ?? false) ||
-            item.genres.some(g => g.toLowerCase().includes(normalizedItemQuery));
-          return matchesCategory && matchesPlatform && matchesQuery;
+          return matchesCategory && matchesPlatform && matchesItemQuery(item);
         }),
         itemSortMode
-      )
-    : [];
+      );
   // Group the (already filtered and sorted) items by content type, in catalog order.
   const itemSections = LIST_CONTENT_TYPES.map(type => ({
     key: type.key,
@@ -1336,9 +1374,21 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
                   onPress={() => setCategoryFilter('all')}
                 >
                   <Text style={[styles.filterChipText, activeCategoryFilter === 'all' && styles.activeFilterChipText]}>
-                    Todos ({selectedList.items.length})
+                    Todos ({visibleListItems.length})
                   </Text>
                 </TouchableOpacity>
+                {pastEvents.length > 0 ? (
+                  <TouchableOpacity
+                    style={[styles.filterChip, styles.pastEventsChip, showPastEvents && styles.pastEventsChipActive]}
+                    onPress={() => setPastEventsView({ listId: selectedList.id, active: !showPastEvents })}
+                    accessibilityState={{ selected: showPastEvents }}
+                    accessibilityLabel="Ver eventos pasados"
+                  >
+                    <Text style={[styles.filterChipText, showPastEvents && styles.pastEventsChipTextActive]}>
+                      🕘 Eventos pasados ({pastEvents.length})
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 {LIST_CONTENT_TYPES.filter(
                   type => type.key !== 'other' && getAllowedCategories(selectedList).includes(type.key)
                 ).map(type => (
@@ -1430,9 +1480,13 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             ListEmptyComponent={
               <View style={styles.emptyItemsView}>
                 <Ionicons name="film-outline" size={54} color="#334155" />
-                <Text style={styles.emptyTitle}>Lista vacía o sin coincidencias</Text>
+                <Text style={styles.emptyTitle}>
+                  {showPastEvents ? 'Sin eventos pasados que coincidan' : 'Lista vacía o sin coincidencias'}
+                </Text>
                 <Text style={styles.emptySubtitle}>
-                  {canAddToSelectedList
+                  {showPastEvents
+                    ? 'Los eventos ya celebrados de esta lista aparecen aquí.'
+                    : canAddToSelectedList
                     ? 'Toca «+ Agregar a la lista» para buscar con la API de JustWatch o ingresar un título manualmente.'
                     : 'Todavía no hay elementos que coincidan.'}
                 </Text>
@@ -1637,7 +1691,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           onClose={() => setIsDetailVisible(false)}
           onAddComment={handleAddComment}
           onDeleteItem={handleDeleteItem}
-          listOwnerId={selectedList?.owner.id}
+          onEditItem={setEditingItem}
+          listOwnerId={findSourceList(selectedMedia)?.owner.id ?? selectedList?.owner.id}
           currentUser={{ id: profile.id, name: profile.name, avatar: profile.avatar || '' }}
           isWatched={isWatchedByMe(selectedMedia)}
           onToggleWatched={handleToggleWatched}
@@ -1651,6 +1706,13 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           onOpenPlatform={() => incrementGamificationCounter('platformOpens')}
         />
       )}
+
+      <EditMediaItemModal
+        visible={Boolean(editingItem)}
+        item={editingItem}
+        onClose={() => setEditingItem(null)}
+        onSave={handleSaveItemEdit}
+      />
 
       {profile && (
         <AddMediaModal
@@ -2183,6 +2245,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#1E293B',
     marginRight: 6,
+  },
+  pastEventsChip: {
+    borderColor: '#FB718566',
+  },
+  pastEventsChipActive: {
+    backgroundColor: '#FB7185',
+    borderColor: '#FB7185',
+  },
+  pastEventsChipTextActive: {
+    color: '#0F172A',
+    fontWeight: '800',
   },
   activeFilterChip: {
     backgroundColor: '#38BDF8',

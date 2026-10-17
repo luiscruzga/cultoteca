@@ -7,6 +7,7 @@ import { searchMusic } from './musicSearchService';
 import { searchRecipes } from './recipeSearchService';
 import { searchPlaces } from './placeSearchService';
 import { searchBoardGames } from './boardGameSearchService';
+import { EventSearchLocation, searchEvents } from './eventSearchService';
 import { createTimeoutController, isAbortError } from './requestController';
 import { providerId } from '../../utils/mediaIdentity';
 
@@ -620,6 +621,8 @@ export interface SearchOptions {
   category?: MediaCategory | 'all';
   /** With category 'all', restricts which providers are queried (e.g. the list's allowed types). */
   categories?: MediaCategory[];
+  /** Ubicación para los eventos (cerca del dispositivo o una ciudad). */
+  near?: EventSearchLocation;
   signal?: AbortSignal;
 }
 
@@ -800,10 +803,19 @@ export const searchMedia = async (query: string, options?: SearchOptions): Promi
     category === c || (category === 'all' && (!categories || categories.includes(c)));
 
   if (!cleanQuery) {
+    // Solo eventos con ubicación: lista de próximos eventos cercanos
+    if (category === 'event' && options?.near) {
+      return (await searchEvents('', { limit: 12, near: options.near, signal })).items;
+    }
     return CURATED_CULT_CATALOG.filter(item => wants(item.category));
   }
 
-  const cacheKey = `${category}:${categories ? [...categories].sort().join(',') : '*'}::${lowerQuery}`;
+  const nearKey = options?.near
+    ? 'lat' in options.near
+      ? `${options.near.lat.toFixed(2)},${options.near.lon.toFixed(2)}`
+      : options.near.city.toLowerCase()
+    : '*';
+  const cacheKey = `${category}:${categories ? [...categories].sort().join(',') : '*'}:${nearKey}::${lowerQuery}`;
   const cached = readCache(cacheKey);
   if (cached) return cached;
 
@@ -824,6 +836,12 @@ export const searchMedia = async (query: string, options?: SearchOptions): Promi
   if (wants('recipe')) providers.push({ name: 'Recetas', run: () => searchRecipes(cleanQuery, category === 'recipe' ? 8 : 3, signal) });
   if (wants('place')) providers.push({ name: 'Lugares', run: () => searchPlaces(cleanQuery, category === 'place' ? 8 : 3, signal) });
   if (wants('boardgame')) providers.push({ name: 'Juegos de Mesa', run: () => searchBoardGames(cleanQuery, category === 'boardgame' ? 8 : 3, signal) });
+  if (wants('event')) {
+    providers.push({
+      name: 'Eventos',
+      run: async () => (await searchEvents(cleanQuery, { limit: category === 'event' ? 12 : 3, near: options?.near, signal })).items,
+    });
+  }
 
   const settled = await Promise.allSettled(providers.map(p => p.run()));
 

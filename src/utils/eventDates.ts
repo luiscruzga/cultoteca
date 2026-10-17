@@ -185,6 +185,24 @@ export const formatCountdown = (iso: string, allDay?: boolean, now: Date = new D
   return { label: `En ${months} mes${months > 1 ? 'es' : ''}`, isPast: false };
 };
 
+/**
+ * Un evento está pasado cuando terminó (o empezó, si no tiene fin). Los de todo el día cuentan como
+ * pasados desde el día siguiente.
+ */
+export const isPastEvent = (
+  item: { category: string; eventStartsAt?: string; eventEndsAt?: string; eventAllDay?: boolean },
+  now: Date = new Date()
+): boolean => {
+  if (item.category !== 'event' || !item.eventStartsAt) return false;
+  const reference = new Date(item.eventEndsAt || item.eventStartsAt);
+  if (isNaN(reference.getTime())) return false;
+  if (item.eventAllDay) {
+    const endOfDay = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() + 1);
+    return endOfDay.getTime() <= now.getTime();
+  }
+  return reference.getTime() < now.getTime();
+};
+
 /** Enlace para crear el evento en Google Calendar (abre la app o la web del calendario). */
 export const buildGoogleCalendarUrl = (params: {
   title: string;

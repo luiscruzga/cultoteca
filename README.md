@@ -266,6 +266,8 @@ npm run lint
 | `LUDOPEDIA_ACCESS_TOKEN` | ➖ | Token de Ludopedia (juegos de mesa) | [ludopedia.com.br/aplicativos](https://ludopedia.com.br/aplicativos) |
 | `BGG_RANKS_CSV_PATH` | ➖ | Ruta local al CSV diario `boardgames_ranks.csv` | [boardgamegeek.com/data_dumps/bg_ranks](https://boardgamegeek.com/data_dumps/bg_ranks) (requiere sesión en BGG) |
 | `NOMINATIM_CONTACT_EMAIL` | ➖ | Email para el *User-Agent* exigido por la [política de Nominatim](https://operations.osmfoundation.org/policies/nominatim/) | Tu email de contacto |
+| `TICKETMASTER_API_KEY` | ➖ | Búsqueda de eventos (conciertos, stand up, teatro) con entradas e imágenes | [developer.ticketmaster.com](https://developer.ticketmaster.com/) → My Apps → *Consumer Key* |
+| `PREDICTHQ_ACCESS_TOKEN` | ➖ | Búsqueda de eventos con cobertura mundial (sin entradas ni imágenes) | [control.predicthq.com](https://control.predicthq.com/) → API Tokens (plan gratuito) |
 
 \* Usa `MONGODB_URI` **o** el trío usuario/contraseña/cluster.
 
@@ -381,6 +383,7 @@ cultoteca/
 - **Errores de certificados detrás de un proxy corporativo** (Zscaler, etc.): los scripts ya usan `NODE_TLS_REJECT_UNAUTHORIZED=0` en desarrollo; el backend exporta los certificados del sistema en macOS (`start.js`).
 - **MongoDB: `IP not whitelisted`**: añade tu IP en *Network Access* de Atlas.
 - **No hay resultados de juegos de mesa o lugares**: comprueba que el backend está en marcha y, para BGG, que `BGG_API_TOKEN` está configurado.
+- **La búsqueda de eventos dice que no está configurada**: define `TICKETMASTER_API_KEY` o `PREDICTHQ_ACCESS_TOKEN` en el backend y redespliega; "Cerca de mí" necesita además el permiso de ubicación del dispositivo.
 
 ---
 

@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 import { isCategoryAllowed } from '../utils/listCategories';
 import { isItemInList, isSameWork, toWatchedEntry, toWork } from '../utils/mediaIdentity';
 import { sanitizeListsForViewer } from '../utils/listAccess';
+import { canEditItem, EditableItemFields } from '../utils/itemPermissions';
 
 const LISTS_KEY = '@cultoteca_lists_v1';
 const PROFILE_KEY = '@cultoteca_profile_v1';
@@ -276,6 +277,52 @@ export const StorageService = {
     return lists;
   },
 
+  /**
+   * Edita los campos descriptivos de un elemento. Solo el dueño de la lista o quien lo publicó;
+   * el servidor aplica la misma regla y conserva id, autor y fecha de alta.
+   */
+  async updateMediaItem(
+    listId: string,
+    mediaId: string,
+    changes: Partial<EditableItemFields>,
+    editor: { id: string; name: string }
+  ): Promise<CollaborativeList[]> {
+    const lists = await this.getLists();
+    const targetList = lists.find(l => l.id === listId);
+    if (!targetList) throw new Error('La lista ya no existe.');
+    const index = targetList.items.findIndex(i => i.id === mediaId);
+    if (index === -1) throw new Error('El elemento ya no está en la lista.');
+    const current = targetList.items[index];
+    if (!this.canUserEditItem(targetList, current, editor.id)) {
+      throw new Error('Solo el creador de la lista o quien agregó este elemento puede editarlo.');
+    }
+    const updatedItem: MediaItem = { ...current, ...changes, id: current.id, addedBy: current.addedBy, addedAt: current.addedAt };
+    const updatedList: CollaborativeList = {
+      ...targetList,
+      items: targetList.items.map((item, i) => (i === index ? updatedItem : item)),
+      updatedAt: new Date().toISOString(),
+    };
+    if (MongoDbService.isConfigured()) {
+      await MongoDbService.insertOrUpdateList(updatedList, { strict: true });
+    }
+    Object.assign(targetList, updatedList);
+    await AsyncStorage.setItem(LISTS_KEY, JSON.stringify(lists));
+
+    if (MongoDbService.isConfigured()) {
+      MongoDbService.logAction({
+        userId: editor.id,
+        userName: editor.name,
+        actionType: 'edit_media',
+        targetTitle: updatedItem.title,
+        targetId: updatedItem.id,
+        targetCategory: updatedItem.category,
+        listTitle: targetList.title,
+        details: `Editó "${updatedItem.title}" en la lista "${targetList.title}" (${Object.keys(changes).join(', ')})`,
+      }).catch(err => console.warn('[StorageService] Error logging edit_media:', err));
+    }
+    return lists;
+  },
+
   async updateItemTrackingInfo(
     listId: string,
     mediaId: string,
@@ -530,8 +577,11 @@ export const StorageService = {
   },
 
   canUserDeleteItem(list: CollaborativeList, item: MediaItem, userId?: string | null): boolean {
-    if (!userId || !list || !item) return false;
-    return list.owner.id === userId || item.addedBy?.id === userId;
+    return canEditItem(list, item, userId);
+  },
+
+  canUserEditItem(list: CollaborativeList, item: MediaItem, userId?: string | null): boolean {
+    return canEditItem(list, item, userId);
   },
 
   /**

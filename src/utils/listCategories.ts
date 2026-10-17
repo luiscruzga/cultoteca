@@ -23,7 +23,7 @@ const STANDARD_CATEGORIES = new Set<string>(ALL_LIST_CONTENT_TYPES.filter(t => t
 
 /** Categories that are backed by a search provider (links and custom content are manual). */
 const SEARCHABLE_CATEGORIES: StandardMediaCategory[] = [
-  'movie', 'series', 'anime', 'manga', 'book', 'game', 'boardgame', 'podcast', 'music', 'recipe', 'place',
+  'movie', 'series', 'anime', 'manga', 'book', 'game', 'boardgame', 'podcast', 'music', 'recipe', 'place', 'event',
 ];
 
 /** Allowed content types of a list; legacy lists without the field accept everything. */

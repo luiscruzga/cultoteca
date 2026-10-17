@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cultoteca",
     "slug": "Cultoteca",
-    "version": "1.0.10",
+    "version": "1.0.11",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -45,6 +45,12 @@
           "icon": "./assets/notification-icon.png",
           "color": "#38BDF8",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Cultoteca usa tu ubicación para encontrar eventos cerca de ti."
         }
       ],
       [
