@@ -1,0 +1,142 @@
+# Compila el APK en GitHub (eas build --local, no consume builds de EAS) y lo publica como release de este
+# mismo repositorio, desde donde la app se auto-actualiza (src/services/updateService.ts consulta
+# releases/latest de EXPO_PUBLIC_GITHUB_REPO y toma el primer asset .apk).
+#
+# - Push de un tag `vX.Y.Z` → compila y crea el release `vX.Y.Z` con `cultoteca-vX.Y.Z.apk`.
+#   El tag debe coincidir con `expo.version` de app.json (la app compara esa versión con el tag).
+# - "Run workflow" manual → solo compila y deja el APK como artefacto descargable del run.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+# - EXPO_TOKEN: expo.dev → Account settings → Access tokens. Autentica a EAS para el versionCode remoto.
+# - APP_DOTENV: contenido completo del `.env` de la app (solo variables EXPO_PUBLIC_*, se incrustan en el APK).
+# - GOOGLE_SERVICES_JSON: contenido de `google-services.json` (Firebase, notificaciones push).
+# Ambos ficheros están ignorados por git y se reconstruyen en el runner antes de compilar.
+name: Android APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # publicar el release y subir el APK
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # El runner trae ~14 GB libres y el build de Android los agota. Se borran herramientas que no usamos
+      # (el SDK de Android se conserva); así quedan ~30 GB.
+      - name: Liberar espacio en disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historial completo para las notas del release (commits desde el tag anterior)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # El SDK de Android ya viene instalado en ubuntu-latest (ANDROID_HOME).
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: Ficheros de configuración (ignorados por git)
+        env:
+          APP_DOTENV: ${{ secrets.APP_DOTENV }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [[ -z "$APP_DOTENV" ]]; then
+            echo "::error::Falta el secret APP_DOTENV (contenido del .env con las variables EXPO_PUBLIC_*)."
+            exit 1
+          fi
+          if [[ -z "$GOOGLE_SERVICES_JSON" ]]; then
+            echo "::error::Falta el secret GOOGLE_SERVICES_JSON (contenido de google-services.json)."
+            exit 1
+          fi
+          printf '%s\n' "$APP_DOTENV" > .env
+          printf '%s\n' "$GOOGLE_SERVICES_JSON" > google-services.json
+          node -e "JSON.parse(require('fs').readFileSync('google-services.json','utf8'))" \
+            || { echo "::error::GOOGLE_SERVICES_JSON no es un JSON válido."; exit 1; }
+          if grep -vE '^(#|$|EXPO_PUBLIC_)' .env | grep -q .; then
+            echo "::error::APP_DOTENV contiene variables que no son EXPO_PUBLIC_*; los secretos del backend no deben entrar en el APK."
+            exit 1
+          fi
+          echo "Variables públicas: $(grep -cE '^EXPO_PUBLIC_' .env)"
+
+      - name: Versión de la app
+        id: version
+        run: |
+          VERSION=$(node -p "require('./app.json').expo.version")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "::error::El tag $GITHUB_REF_NAME no coincide con expo.version de app.json ($VERSION). Sube la versión en app.json antes de crear el tag."
+            exit 1
+          fi
+          if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+            echo "::warning::package.json está en $PKG_VERSION y app.json en $VERSION; conviene alinearlos."
+          fi
+
+      - name: Compilar APK
+        env:
+          EAS_LOCAL_BUILD_WORKINGDIR: ${{ runner.temp }}/eas-build
+          # Solo dispositivos ARM: acorta el build y el APK (los emuladores x86 no son el destino).
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a,armeabi-v7a
+        run: eas build --platform android --profile preview --local --non-interactive --output "cultoteca-v${{ steps.version.outputs.version }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cultoteca-v${{ steps.version.outputs.version }}
+          path: cultoteca-*.apk
+          retention-days: 14
+
+      - name: Notas del release
+        if: github.ref_type == 'tag'
+        id: notes
+        run: |
+          PREVIOUS=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "Versión ${{ steps.version.outputs.version }} de Cultoteca para Android."
+            echo
+            if [[ -n "$PREVIOUS" ]]; then
+              echo "## Cambios desde $PREVIOUS"
+              echo
+              git log --no-merges --pretty='- %s' "$PREVIOUS..$GITHUB_REF_NAME"
+            else
+              echo "## Cambios"
+              echo
+              git log --no-merges --pretty='- %s' -n 30 "$GITHUB_REF_NAME"
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publicar release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: cultoteca-*.apk
+          make_latest: true

@@ -297,11 +297,34 @@ eas build -p android --profile production   # AAB para Google Play
 - EAS sube tu `.env` (ver `.easignore`) para fijar las variables `EXPO_PUBLIC_*` en el binario. Alternativamente, defínelas como [variables de entorno de EAS](https://docs.expo.dev/eas/environment-variables/).
 - Antes de cada release, sube `version` en `app.json` y `package.json`.
 
+### Release automático con GitHub Actions
+
+El workflow [`.github/workflows/android-apk.yml`](.github/workflows/android-apk.yml) compila el APK en GitHub (`eas build --local`, sin consumir builds de EAS) y publica el release cada vez que se sube un tag de versión:
+
+```bash
+# 1. Sube "version" en app.json y package.json (p. ej. 1.0.9) y haz commit
+# 2. Crea y sube el tag: debe coincidir con expo.version de app.json
+git tag v1.0.9
+git push origin main --tags
+```
+
+El run crea el release `v1.0.9` con `cultoteca-v1.0.9.apk` y las notas con los commits desde el tag anterior; la app lo detecta en "Buscar actualizaciones". Si el tag no coincide con `app.json`, el workflow falla antes de compilar. Desde la pestaña *Actions* también se puede lanzar a mano ("Run workflow"): entonces solo compila y deja el APK como artefacto del run.
+
+Secrets necesarios (GitHub → *Settings → Secrets and variables → Actions*):
+
+| Secret | Contenido |
+|---|---|
+| `EXPO_TOKEN` | Token de acceso de [expo.dev](https://expo.dev/accounts/lcruga/settings/access-tokens) (autentica a EAS para el `versionCode` remoto) |
+| `APP_DOTENV` | Contenido completo del `.env` de la app (solo `EXPO_PUBLIC_*`; el workflow rechaza cualquier otra variable) |
+| `GOOGLE_SERVICES_JSON` | Contenido de `google-services.json` (Firebase / notificaciones push) |
+
+`.env` y `google-services.json` están ignorados por git y se reconstruyen en el runner a partir de esos secrets.
+
 ## Publicar actualizaciones
 
 La app compara su versión con la última publicada y ofrece descargar el APK nuevo. Dos opciones:
 
-**Opción 1 — GitHub Releases** (`EXPO_PUBLIC_GITHUB_REPO=usuario/repo`): crea un release con un tag de versión (p. ej. `v1.0.2`) y adjunta el `.apk`. La app consulta `releases/latest` y usa el primer asset que termine en `.apk`.
+**Opción 1 — GitHub Releases** (`EXPO_PUBLIC_GITHUB_REPO=usuario/repo`): crea un release con un tag de versión (p. ej. `v1.0.2`) y adjunta el `.apk`. La app consulta `releases/latest` y usa el primer asset que termine en `.apk`. Con el workflow de release automático (ver arriba) basta con subir el tag.
 
 **Opción 2 — Manifiesto propio** (`EXPO_PUBLIC_UPDATE_URL`): publica un JSON como este:
 
