@@ -29,6 +29,8 @@ import { PointsToastHost } from './PointsToast';
 import { TrailerHero } from './TrailerHero';
 import { TrailerPlayerModal } from './TrailerPlayerModal';
 import { fetchTrailerKey, hasTrailerSupport } from '../services/api/trailerService';
+import { SocialEmbed } from './SocialEmbed';
+import { resolveLinkEmbed } from '../utils/linkEmbeds';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -132,6 +134,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [trailer, setTrailer] = useState<{ itemId: string; key: string | null } | null>(null);
   // Id del item cuyo trailer está abierto en grande (así no se arrastra al cambiar de obra).
   const [trailerPlayerItemId, setTrailerPlayerItemId] = useState<string | null>(null);
+  // Ítem de tipo enlace cuyo embed falló: se vuelve a la miniatura (el estado no se arrastra a otro ítem).
+  const [embedFailedItemId, setEmbedFailedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!item || !visible || !hasTrailerSupport(item)) return;
@@ -147,6 +151,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   if (!item || !visible) return null;
 
   const trailerKey = trailer?.itemId === item.id ? trailer.key : null;
+  // Reproductor/publicación embebida de la plataforma para ítems de tipo enlace (derivado de la URL guardada).
+  const linkEmbed = item.category === 'link' && embedFailedItemId !== item.id ? resolveLinkEmbed(item.url) : null;
   const isTrailerPlayerVisible = Boolean(trailerKey) && trailerPlayerItemId === item.id;
 
   const providers =
@@ -262,6 +268,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               posterUrl={item.posterUrl}
               onPress={() => setTrailerPlayerItemId(item.id)}
             />
+          ) : null}
+
+          {/* Enlace social: reproducción automática (silenciada) del embed oficial de la plataforma */}
+          {linkEmbed ? (
+            <View style={styles.linkEmbedHero}>
+              <SocialEmbed key={item.id} embed={linkEmbed} onError={() => setEmbedFailedItemId(item.id)} />
+            </View>
           ) : null}
 
           {/* Main Info Hero */}
@@ -982,6 +995,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingBottom: 60,
+  },
+  linkEmbedHero: {
+    // Sale del padding horizontal y superior del ScrollView, como la cabecera del trailer
+    marginHorizontal: -20,
+    marginTop: -20,
+    marginBottom: 16,
+    backgroundColor: '#000',
   },
   heroSection: {
     flexDirection: 'row',

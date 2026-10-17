@@ -23,6 +23,9 @@ import { AddMediaModal } from './src/components/AddMediaModal';
 import { AppFooter } from './src/components/AppFooter';
 import { AppUpdatesModal } from './src/components/AppUpdatesModal';
 import { ShareDestination } from './src/components/ShareItemModal';
+import { ShareTargetListPickerModal } from './src/components/ShareTargetListPickerModal';
+import { extractFirstUrl } from './src/services/api/linkPreviewService';
+import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
 import { PointsToastHost, showPointsToast } from './src/components/PointsToast';
@@ -89,6 +92,8 @@ import { ApiAuthBridge } from './src/components/ApiAuthBridge';
 import { ClerkSessionGate } from './src/components/ClerkSessionGate';
 
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
+// El módulo nativo de compartir no existe en web; en Android/iOS entrega el enlace recibido desde otras apps.
+const SHARE_INTENT_OPTIONS = { disabled: Platform.OS === 'web' };
 
 function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   // Global Data States
@@ -113,6 +118,12 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [authModalInitialMode, setAuthModalInitialMode] = useState<'signin' | 'signup'>('signin');
   const [isNotificationsModalVisible, setIsNotificationsModalVisible] = useState(false);
   const [isPublicListsVisible, setIsPublicListsVisible] = useState(false);
+  // Enlace compartido con Cultoteca desde otra app: espera sesión y listas, y luego pide la lista de destino.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  const [pendingSharedUrl, setPendingSharedUrl] = useState<string | null>(null);
+  const [isShareTargetPickerVisible, setIsShareTargetPickerVisible] = useState(false);
+  // URL con la que se abre la pestaña Enlace de AddMediaModal (vacía al abrir con el botón "+").
+  const [addMediaInitialUrl, setAddMediaInitialUrl] = useState<string | undefined>(undefined);
 
   // Social & Followed state
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
@@ -165,6 +176,60 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     () => StorageService.getPendingInvitations(lists, profile?.id).length,
     [lists, profile?.id]
   );
+
+  // 1) Llega un intent de compartir: se extrae la URL y se consume el intent.
+  useEffect(() => {
+    if (!hasShareIntent) return;
+    const url = shareIntent.webUrl || extractFirstUrl(shareIntent.text);
+    resetShareIntent();
+    if (!url) {
+      Alert.alert('Solo enlaces', 'Cultoteca solo puede recibir enlaces compartidos desde otras aplicaciones.');
+      return;
+    }
+    setPendingSharedUrl(url);
+    // shareIntent/resetShareIntent cambian con cada intent; solo interesa el momento en que aparece uno
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasShareIntent]);
+
+  // 2) Con la URL pendiente: sin sesión se pide iniciar sesión; con las listas cargadas se elige destino.
+  useEffect(() => {
+    if (!pendingSharedUrl) return;
+    if (!profile) {
+      setAuthModalInitialMode('signin');
+      setIsAuthModalVisible(true);
+      return;
+    }
+    if (listsLoadedFor !== profile.id || isListsLoading) return;
+    setIsShareTargetPickerVisible(true);
+  }, [pendingSharedUrl, profile, listsLoadedFor, isListsLoading]);
+
+  // Listas del usuario que aceptan enlaces y en las que puede aportar.
+  const shareTargetDestinations: ShareDestination[] = useMemo(() => {
+    if (!profile) return [];
+    return homeLists
+      .filter(l => StorageService.canUserContribute(l, profile.id, followedListIds) && isCategoryAllowed(l, 'link'))
+      .map(l => ({
+        list: l,
+        relation: l.owner.id === profile.id ? 'owner' : l.collaborators.some(c => c.id === profile.id) ? 'collaborator' : 'follower',
+        alreadyAdded: false,
+      }));
+  }, [homeLists, profile, followedListIds]);
+
+  const handleShareTargetSelect = (list: CollaborativeList) => {
+    const url = pendingSharedUrl;
+    setIsShareTargetPickerVisible(false);
+    setPendingSharedUrl(null);
+    if (!url) return;
+    setSelectedList(list);
+    setActiveTab('lists');
+    setAddMediaInitialUrl(url);
+    setIsAddVisible(true);
+  };
+
+  const handleShareTargetDismiss = () => {
+    setIsShareTargetPickerVisible(false);
+    setPendingSharedUrl(null);
+  };
   const bellCount = unreadNotificationsCount + pendingInvitesCount;
 
   const pickInitialList = (allLists: CollaborativeList[], userId?: string, followed: string[] = []) =>
@@ -1510,7 +1575,11 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       {/* Modals */}
       <AuthModal
         visible={isAuthModalVisible}
-        onClose={() => setIsAuthModalVisible(false)}
+        onClose={() => {
+          setIsAuthModalVisible(false);
+          // Cerrar el login sin sesión descarta el enlace compartido pendiente
+          if (!profile) setPendingSharedUrl(null);
+        }}
         currentUser={profile}
         initialMode={authModalInitialMode}
         onLoginSuccess={handleLoginSuccess}
@@ -1577,12 +1646,30 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
       {profile && (
         <AddMediaModal
           visible={isAddVisible}
-          onClose={() => setIsAddVisible(false)}
+          onClose={() => {
+            setIsAddVisible(false);
+            setAddMediaInitialUrl(undefined);
+          }}
           onAddMedia={handleAddMedia}
           currentUser={{ id: profile.id, name: profile.name, avatar: profile.avatar }}
           defaultCategory={activeCategoryFilter}
           allowedCategories={getAllowedCategories(selectedList)}
           existingItems={selectedList?.items ?? []}
+          initialLinkUrl={addMediaInitialUrl}
+        />
+      )}
+
+      {pendingSharedUrl && (
+        <ShareTargetListPickerModal
+          visible={isShareTargetPickerVisible}
+          url={pendingSharedUrl}
+          destinations={shareTargetDestinations}
+          onSelect={handleShareTargetSelect}
+          onCreateList={() => {
+            setIsShareTargetPickerVisible(false);
+            openCreateList();
+          }}
+          onClose={handleShareTargetDismiss}
         />
       )}
 
@@ -1718,20 +1805,25 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
 const newItemId = () => `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
 export default function App() {
+  // ShareIntentProvider va antes que cualquier otro provider para recibir el intent de compartir al arrancar.
   if (CLERK_PUBLISHABLE_KEY) {
     return (
-      <SafeAreaProvider>
-        <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
-          <ApiAuthBridge />
-          <MainApp clerkEnabled />
-        </ClerkProvider>
-      </SafeAreaProvider>
+      <ShareIntentProvider options={SHARE_INTENT_OPTIONS}>
+        <SafeAreaProvider>
+          <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+            <ApiAuthBridge />
+            <MainApp clerkEnabled />
+          </ClerkProvider>
+        </SafeAreaProvider>
+      </ShareIntentProvider>
     );
   }
   return (
-    <SafeAreaProvider>
-      <MainApp />
-    </SafeAreaProvider>
+    <ShareIntentProvider options={SHARE_INTENT_OPTIONS}>
+      <SafeAreaProvider>
+        <MainApp />
+      </SafeAreaProvider>
+    </ShareIntentProvider>
   );
 }
 

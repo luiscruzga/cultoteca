@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Modal,
@@ -12,12 +13,14 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { MIN_SEARCH_QUERY_LENGTH, searchMedia } from '../services/api/mediaSearchService';
 import { isAbortError } from '../services/api/requestController';
 import { enrichTmdbItem, isTmdbSearchItem } from '../services/api/tmdbService';
 import { resolveProviderLinks } from '../services/api/providerLinksService';
 import {
   buildLinkMediaItem,
+  extractFirstUrl,
   fetchLinkPreview,
   LinkPreviewData,
   normalizeUrl,
@@ -45,6 +48,8 @@ interface AddMediaModalProps {
   allowedCategories?: ListContentType[];
   /** Items already in the target list: matching search results can't be added again. */
   existingItems?: MediaItem[];
+  /** URL recibida desde fuera (p. ej. compartida por otra app): abre la pestaña Enlace con la vista previa en curso. */
+  initialLinkUrl?: string;
 }
 
 const SEARCH_DEBOUNCE_MS = 2000;
@@ -121,6 +126,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   onRecommendDirectly,
   allowedCategories = ALL_LIST_CONTENT_TYPES,
   existingItems = [],
+  initialLinkUrl,
 }) => {
   const [preferredTab, setTab] = useState<'search' | 'link' | 'manual'>('search');
   const [newCatInput, setNewCatInput] = useState('');
@@ -335,6 +341,38 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     }
   };
 
+  // URL inicial (enlace compartido desde otra app): pestaña Enlace, campo relleno y vista previa en curso.
+  const applyInitialLinkUrl = () => {
+    if (!initialLinkUrl) return false;
+    setTab('link');
+    setLinkUrl(initialLinkUrl);
+    setLinkPreview(null);
+    setLinkCustomTitle('');
+    setLinkCustomDesc('');
+    setLinkPosterOverride('');
+    handleFetchLinkPreview(initialLinkUrl);
+    return true;
+  };
+
+  const handlePasteLink = async () => {
+    let text = '';
+    try {
+      text = await Clipboard.getStringAsync();
+    } catch {
+      text = '';
+    }
+    const url = extractFirstUrl(text);
+    if (!url) {
+      Alert.alert('No hay ningún enlace', 'Copia primero un enlace (TikTok, Instagram, X, Facebook, YouTube o una web) y vuelve a pulsar Pegar.');
+      return;
+    }
+    if (linkTimeoutRef.current) {
+      clearTimeout(linkTimeoutRef.current);
+    }
+    setLinkUrl(url);
+    handleFetchLinkPreview(url);
+  };
+
   const handleSaveLink = () => {
     if (!linkUrl.trim() || !linkCustomTitle.trim()) return;
 
@@ -448,6 +486,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       transparent={false}
       onRequestClose={handleClose}
       onShow={() => {
+        if (applyInitialLinkUrl()) return;
         if (tab === 'search') focusAfterRender(searchInputRef);
       }}
     >
@@ -682,9 +721,10 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
               <Ionicons name="link" size={20} color="#38BDF8" />
               <Text style={styles.linkInfoText}>
                 Pega cualquier enlace de{' '}
-                <Text style={styles.boldText}>X (Twitter), Instagram, Facebook, YouTube</Text> o cualquier
-                artículo o página web. Obtendremos una vista previa y podrás personalizar el título y la
-                descripción.
+                <Text style={styles.boldText}>TikTok, Instagram, X (Twitter), Facebook, YouTube</Text> o
+                cualquier artículo o página web. Obtendremos el título, la descripción y la miniatura (podrás
+                editarlos) y la publicación se reproducirá dentro de Cultoteca. También puedes compartir
+                directamente con Cultoteca desde esas apps.
               </Text>
             </View>
 
@@ -704,7 +744,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                 returnKeyType="done"
                 onSubmitEditing={() => handleFetchLinkPreview()}
               />
-              {linkUrl.length > 0 && (
+              {linkUrl.length > 0 ? (
                 <TouchableOpacity
                   style={styles.linkClearBtn}
                   onPress={() => {
@@ -716,6 +756,17 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                   }}
                 >
                   <Ionicons name="close-circle" size={18} color="#64748B" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.linkPasteBtn}
+                  onPress={handlePasteLink}
+                  disabled={isFetchingPreview}
+                  activeOpacity={0.8}
+                  accessibilityLabel="Pegar enlace del portapapeles"
+                >
+                  <Ionicons name="clipboard-outline" size={14} color="#38BDF8" />
+                  <Text style={styles.linkPasteBtnText}>Pegar</Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity
@@ -1445,6 +1496,21 @@ const styles = StyleSheet.create({
   },
   linkClearBtn: {
     padding: 4,
+  },
+  linkPasteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+  },
+  linkPasteBtnText: {
+    color: '#38BDF8',
+    fontWeight: '700',
+    fontSize: 12,
   },
   linkFetchBtn: {
     flexDirection: 'row',

@@ -1,9 +1,12 @@
 import { MediaItem } from '../../types';
+import { requestBackend } from './searchProxyService';
 
-export type SocialPlatform = 'twitter' | 'instagram' | 'facebook' | 'youtube' | 'web';
+export type SocialPlatform = 'twitter' | 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'web';
 
 export interface LinkPreviewData {
+  /** URL canónica (enlaces cortos ya resueltos); es la que se guarda en el ítem. */
   url: string;
+  /** URL tal y como la introdujo el usuario. */
   originalUrl: string;
   title: string;
   description: string;
@@ -17,14 +20,31 @@ export interface LinkPreviewData {
   isFallback?: boolean;
 }
 
+interface PartialMetadata {
+  url?: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+}
+
 // Fallback visual artwork by platform
 const FALLBACK_IMAGES: Record<SocialPlatform, string> = {
   twitter: 'https://images.unsplash.com/photo-1611605698335-8b1569810432?w=800&q=80',
   instagram: 'https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800&q=80',
   facebook: 'https://images.unsplash.com/photo-1562577309-4932fdd64cd1?w=800&q=80',
   youtube: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&q=80',
+  tiktok: 'https://images.unsplash.com/photo-1611605698335-8b1569810432?w=800&q=80',
   web: 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?w=800&q=80',
 };
+
+/** Hosts de enlaces cortos que se resuelven a su URL canónica antes de buscar metadatos. */
+const SHORT_LINK_HOSTS = ['vm.tiktok.com', 'vt.tiktok.com', 't.co', 'fb.watch', 'l.instagram.com'];
+
+const OEMBED_TIMEOUT_MS = 6000;
+const REDIRECT_TIMEOUT_MS = 6000;
+const BACKEND_TIMEOUT_MS = 7000;
+const SCRAPE_TIMEOUT_MS = 7500;
 
 /**
  * Normalizes input URL string ensuring valid protocol.
@@ -36,6 +56,15 @@ export function normalizeUrl(rawUrl: string): string {
     trimmed = 'https://' + trimmed;
   }
   return trimmed;
+}
+
+/** Primera URL http(s) que aparece en un texto (p. ej. el texto compartido por otra app). */
+export function extractFirstUrl(text?: string | null): string | null {
+  if (!text) return null;
+  const match = /https?:\/\/[^\s<>"'）)\]]+/i.exec(text);
+  if (match) return match[0].replace(/[.,;:!?]+$/, '');
+  const bare = /(?:^|\s)((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\/[^\s]*)/i.exec(text);
+  return bare ? normalizeUrl(bare[1]) : null;
 }
 
 /**
@@ -86,6 +115,15 @@ export function detectPlatform(urlStr: string): {
         platformColor: '#FF0000',
         platformIcon: 'logo-youtube',
         cleanDomain: 'youtube.com',
+      };
+    }
+    if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+      return {
+        platform: 'tiktok',
+        platformLabel: 'TikTok',
+        platformColor: '#FE2C55',
+        platformIcon: 'logo-tiktok',
+        cleanDomain: 'tiktok.com',
       };
     }
 
@@ -143,21 +181,65 @@ function toAbsoluteUrl(candidateUrl: string, baseUrl: string): string {
   }
 }
 
+const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const fetchJson = async <T>(url: string, timeoutMs = OEMBED_TIMEOUT_MS): Promise<T | null> => {
+  try {
+    const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, timeoutMs);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+};
+
+const isShortLink = (url: string): boolean => {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    return SHORT_LINK_HOSTS.includes(host);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Sigue las redirecciones de un enlace corto y devuelve la URL final.
+ * En web el navegador puede bloquearlo por CORS: se devuelve la original.
+ */
+async function resolveShortLink(url: string): Promise<string> {
+  try {
+    const res = await fetchWithTimeout(url, { method: 'GET', redirect: 'follow' }, REDIRECT_TIMEOUT_MS);
+    const finalUrl = res.url;
+    if (finalUrl && /^https?:\/\//i.test(finalUrl)) {
+      // Instagram y Facebook redirigen a login conservando la URL de destino en `next`/`u`
+      try {
+        const parsed = new URL(finalUrl);
+        const next = parsed.searchParams.get('next') || parsed.searchParams.get('u');
+        if (/\/login/.test(parsed.pathname) && next) return toAbsoluteUrl(next, finalUrl);
+      } catch {
+        // se ignora
+      }
+      return finalUrl;
+    }
+  } catch {
+    // CORS, red o timeout: se mantiene la URL original
+  }
+  return url;
+}
+
 /**
  * Parses Open Graph, Twitter and standard meta tags from HTML string.
  */
-function parseHtmlMetadata(html: string, pageUrl: string): {
-  title?: string;
-  description?: string;
-  imageUrl?: string;
-  siteName?: string;
-} {
-  const result: {
-    title?: string;
-    description?: string;
-    imageUrl?: string;
-    siteName?: string;
-  } = {};
+function parseHtmlMetadata(html: string, pageUrl: string): PartialMetadata {
+  const result: PartialMetadata = {};
 
   // Extract meta tags: property/name and content
   const metaRegex = /<meta\s+[^>]*?(?:name|property)=["']([^"']+)["'][^>]*?content=["']([^"']*)["'][^>]*>/gi;
@@ -182,6 +264,9 @@ function parseHtmlMetadata(html: string, pageUrl: string): {
     if (!result.siteName && (k === 'og:site_name' || k === 'site_name')) {
       result.siteName = v;
     }
+    if (!result.url && k === 'og:url') {
+      result.url = toAbsoluteUrl(v, pageUrl);
+    }
   };
 
   while ((match = metaRegex.exec(html)) !== null) {
@@ -202,69 +287,97 @@ function parseHtmlMetadata(html: string, pageUrl: string): {
   return result;
 }
 
+/** Títulos genéricos que devuelven las páginas de login o de bloqueo: no aportan nada. */
+const GENERIC_TITLES = ['instagram', 'facebook', 'log in', 'iniciar sesión', 'tiktok', 'x', 'twitter'];
+const isGenericTitle = (title?: string) => !title || GENERIC_TITLES.includes(title.trim().toLowerCase());
+
+const hasUsefulMetadata = (meta: PartialMetadata | null): boolean =>
+  Boolean(meta && ((meta.title && !isGenericTitle(meta.title)) || meta.description || meta.imageUrl));
+
 /**
  * Fetches preview metadata for YouTube using oEmbed.
  */
-async function fetchYouTubeOEmbed(url: string): Promise<Partial<LinkPreviewData> | null> {
-  try {
-    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
-    const res = await fetch(oembedUrl);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return {
-      title: data.title || '',
-      description: data.author_name ? `Video de ${data.author_name} en YouTube` : 'Video de YouTube',
-      imageUrl: data.thumbnail_url || '',
-      siteName: 'YouTube',
-    };
-  } catch {
-    return null;
-  }
+async function fetchYouTubeOEmbed(url: string): Promise<PartialMetadata | null> {
+  const data = await fetchJson<{ title?: string; author_name?: string; thumbnail_url?: string }>(
+    `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
+  );
+  if (!data) return null;
+  return {
+    title: data.title || '',
+    description: data.author_name ? `Video de ${data.author_name} en YouTube` : 'Video de YouTube',
+    imageUrl: data.thumbnail_url || '',
+    siteName: 'YouTube',
+  };
+}
+
+/**
+ * Fetches preview metadata for TikTok using its public oEmbed endpoint (no token needed).
+ * Also resolves short links: the response carries the video id and the author handle.
+ */
+async function fetchTikTokOEmbed(url: string): Promise<PartialMetadata | null> {
+  const data = await fetchJson<{
+    title?: string;
+    author_name?: string;
+    author_unique_id?: string;
+    author_url?: string;
+    thumbnail_url?: string;
+    embed_product_id?: string;
+  }>(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`);
+  if (!data || (!data.title && !data.embed_product_id)) return null;
+
+  const handle = data.author_unique_id || data.author_url?.match(/@([^/?]+)/)?.[1];
+  const canonical =
+    data.embed_product_id && handle
+      ? `https://www.tiktok.com/@${handle}/video/${data.embed_product_id}`
+      : undefined;
+  const author = data.author_name ? `${data.author_name}` : handle ? `@${handle}` : '';
+  const caption = decodeHtmlEntities(data.title || '');
+  return {
+    url: canonical,
+    title: author ? `${author} en TikTok` : caption || 'Video de TikTok',
+    description: caption,
+    imageUrl: data.thumbnail_url || '',
+    siteName: 'TikTok',
+  };
 }
 
 /**
  * Fetches preview metadata for Twitter / X using oEmbed or FxTwitter API.
  */
-async function fetchTwitterOEmbed(url: string): Promise<Partial<LinkPreviewData> | null> {
+async function fetchTwitterOEmbed(url: string): Promise<PartialMetadata | null> {
   // Strategy 1: Official Twitter Publish oEmbed
-  try {
-    const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
-    const res = await fetch(oembedUrl);
-    if (res.ok) {
-      const data = await res.json();
-      let text = '';
-      if (data.html) {
-        // Strip tags from oembed html blockquote
-        text = decodeHtmlEntities(data.html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
-      }
-      return {
-        title: data.author_name ? `Publicación de @${data.author_name} en X` : 'Publicación en X (Twitter)',
-        description: text || 'Publicación en X',
-        siteName: 'X (Twitter)',
-        imageUrl: FALLBACK_IMAGES.twitter,
-      };
+  const oembed = await fetchJson<{ html?: string; author_name?: string; url?: string }>(
+    `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`
+  );
+  if (oembed) {
+    let text = '';
+    if (oembed.html) {
+      // Strip tags from oembed html blockquote
+      text = decodeHtmlEntities(oembed.html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
     }
-  } catch {
-    // Strategy 1 failed, continue
+    return {
+      url: oembed.url,
+      title: oembed.author_name ? `Publicación de ${oembed.author_name} en X` : 'Publicación en X (Twitter)',
+      description: text || 'Publicación en X',
+      siteName: 'X (Twitter)',
+      imageUrl: FALLBACK_IMAGES.twitter,
+    };
   }
 
   // Strategy 2: FxTwitter API for rich image extraction
   try {
     const parsed = new URL(url);
-    const fxUrl = `https://api.fxtwitter.com${parsed.pathname}`;
-    const res = await fetch(fxUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.tweet) {
-        const t = data.tweet;
-        const img = t.media?.photos?.[0]?.url || t.media?.mosaic?.formats?.jpeg || t.author?.avatar_url;
-        return {
-          title: t.author?.name ? `Publicación de ${t.author.name} (@${t.author.screen_name})` : 'Publicación en X',
-          description: t.text || '',
-          imageUrl: img || FALLBACK_IMAGES.twitter,
-          siteName: 'X (Twitter)',
-        };
-      }
+    const data = await fetchJson<{ tweet?: any }>(`https://api.fxtwitter.com${parsed.pathname}`);
+    if (data?.tweet) {
+      const t = data.tweet;
+      const img = t.media?.photos?.[0]?.url || t.media?.mosaic?.formats?.jpeg || t.author?.avatar_url;
+      return {
+        url: t.url,
+        title: t.author?.name ? `Publicación de ${t.author.name} (@${t.author.screen_name})` : 'Publicación en X',
+        description: t.text || '',
+        imageUrl: img || FALLBACK_IMAGES.twitter,
+        siteName: 'X (Twitter)',
+      };
     }
   } catch {
     // FxTwitter failed
@@ -274,14 +387,56 @@ async function fetchTwitterOEmbed(url: string): Promise<Partial<LinkPreviewData>
 }
 
 /**
+ * Backend metadata proxy (`GET /api/link-preview`): the server downloads the page with a crawler
+ * User-Agent, which Instagram and Facebook serve with Open Graph tags, and it is not affected by CORS.
+ * Returns null without a verified session or when the backend is unavailable.
+ */
+async function fetchBackendLinkPreview(url: string): Promise<PartialMetadata | null> {
+  try {
+    const data = await requestBackend<PartialMetadata & { error?: string }>(
+      `/api/link-preview?url=${encodeURIComponent(url)}`,
+      undefined,
+      BACKEND_TIMEOUT_MS
+    );
+    if (!data || data.error) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Device-side Open Graph scraping (last resort; blocked by CORS on web). */
+async function fetchDeviceScrape(url: string): Promise<PartialMetadata | null> {
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        },
+      },
+      SCRAPE_TIMEOUT_MS
+    );
+    if (!response.ok) return null;
+    return parseHtmlMetadata(await response.text(), url);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Main service method: extracts preview metadata for any URL.
+ * Order: short-link resolution → platform oEmbed → backend proxy → device scraping → fallback.
  */
 export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreviewData> {
   const normalized = normalizeUrl(rawUrl);
-  const platformInfo = detectPlatform(normalized);
+  let platformInfo = detectPlatform(normalized);
 
-  const fallbackResult: LinkPreviewData = {
-    url: normalized,
+  const buildFallback = (url: string): LinkPreviewData => ({
+    url,
     originalUrl: rawUrl,
     title: platformInfo.platformLabel !== 'Web' ? `${platformInfo.platformLabel}` : platformInfo.cleanDomain,
     description: '',
@@ -292,81 +447,54 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreviewData>
     platformColor: platformInfo.platformColor,
     platformIcon: platformInfo.platformIcon,
     isFallback: true,
-  };
+  });
 
   if (!normalized) {
-    return fallbackResult;
+    return buildFallback(normalized);
   }
 
-  // Try platform-specific APIs first
-  if (platformInfo.platform === 'youtube') {
-    const ytData = await fetchYouTubeOEmbed(normalized);
-    if (ytData && ytData.title) {
-      return {
-        ...fallbackResult,
-        title: ytData.title || fallbackResult.title,
-        description: ytData.description || fallbackResult.description,
-        imageUrl: ytData.imageUrl || fallbackResult.imageUrl,
-        siteName: ytData.siteName || fallbackResult.siteName,
-        isFallback: false,
-      };
-    }
+  // 1. Short links → canonical URL (the platform may change, e.g. t.co → any site)
+  let canonical = normalized;
+  if (isShortLink(normalized)) {
+    canonical = await resolveShortLink(normalized);
+    platformInfo = detectPlatform(canonical);
   }
 
-  if (platformInfo.platform === 'twitter') {
-    const twData = await fetchTwitterOEmbed(normalized);
-    if (twData && (twData.title || twData.description)) {
-      return {
-        ...fallbackResult,
-        title: twData.title || fallbackResult.title,
-        description: twData.description || fallbackResult.description,
-        imageUrl: twData.imageUrl || fallbackResult.imageUrl,
-        siteName: twData.siteName || fallbackResult.siteName,
-        isFallback: false,
-      };
-    }
+  const merge = (meta: PartialMetadata, isFallback = false): LinkPreviewData => {
+    const fallback = buildFallback(meta.url || canonical);
+    return {
+      ...fallback,
+      title: meta.title || fallback.title,
+      description: meta.description || '',
+      imageUrl: meta.imageUrl || fallback.imageUrl,
+      siteName: meta.siteName || fallback.siteName,
+      isFallback,
+    };
+  };
+
+  // 2. Platform oEmbed without token
+  let oembed: PartialMetadata | null = null;
+  if (platformInfo.platform === 'youtube') oembed = await fetchYouTubeOEmbed(canonical);
+  else if (platformInfo.platform === 'twitter') oembed = await fetchTwitterOEmbed(canonical);
+  else if (platformInfo.platform === 'tiktok') oembed = await fetchTikTokOEmbed(canonical);
+  if (oembed && (oembed.title || oembed.description)) {
+    return merge(oembed);
   }
 
-  // Fetch HTML directly with timeout
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7500);
-
-    const response = await fetch(normalized, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-      },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const htmlText = await response.text();
-      const meta = parseHtmlMetadata(htmlText, normalized);
-
-      const title = meta.title || fallbackResult.title;
-      const description = meta.description || '';
-      const imageUrl = meta.imageUrl || fallbackResult.imageUrl;
-      const siteName = meta.siteName || platformInfo.platformLabel;
-
-      return {
-        ...fallbackResult,
-        title,
-        description,
-        imageUrl,
-        siteName,
-        isFallback: !meta.title && !meta.description && !meta.imageUrl,
-      };
-    }
-  } catch {
-    // If fetching fails or times out, fallback seamlessly
+  // 3. Backend proxy, 4. device-side scraping
+  const backend = await fetchBackendLinkPreview(canonical);
+  if (backend && hasUsefulMetadata(backend)) {
+    return merge({ ...backend, url: backend.url && isShortLink(canonical) ? backend.url : canonical });
+  }
+  const scraped = await fetchDeviceScrape(canonical);
+  if (scraped && hasUsefulMetadata(scraped)) {
+    return merge({ ...scraped, url: canonical });
+  }
+  if (scraped?.title) {
+    return merge({ ...scraped, url: canonical }, true);
   }
 
-  return fallbackResult;
+  return buildFallback(canonical);
 }
 
 /**
@@ -382,7 +510,12 @@ export function buildLinkMediaItem(params: {
   userRating?: number;
 }): MediaItem {
   const { url, title, description, imageUrl, previewData, currentUser, userRating } = params;
-  const platformInfo = detectPlatform(url);
+  const typedUrl = url.trim();
+  // The canonical URL of the preview (short links resolved) is the one stored; the typed one stays as a link.
+  const previewMatchesInput =
+    previewData && normalizeUrl(previewData.originalUrl) === normalizeUrl(typedUrl) && previewData.url;
+  const finalUrl = previewMatchesInput ? previewData.url : typedUrl;
+  const platformInfo = detectPlatform(finalUrl);
   const now = new Date().toISOString();
   const currentYear = new Date().getFullYear();
 
@@ -391,6 +524,9 @@ export function buildLinkMediaItem(params: {
     previewData?.imageUrl ||
     FALLBACK_IMAGES[platformInfo.platform] ||
     FALLBACK_IMAGES.web;
+
+  const externalLinks = [{ label: `Visitar en ${platformInfo.platformLabel}`, url: finalUrl }];
+  if (finalUrl !== typedUrl) externalLinks.push({ label: 'Enlace original', url: typedUrl });
 
   return {
     id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -406,15 +542,15 @@ export function buildLinkMediaItem(params: {
     averageRating: userRating || 0,
     ratingsCount: userRating ? 1 : 0,
     userRating,
-    url: url.trim(),
+    url: finalUrl,
     siteName: previewData?.siteName || platformInfo.platformLabel,
-    externalLinks: [{ label: `Visitar en ${platformInfo.platformLabel}`, url: url.trim() }],
+    externalLinks,
     whereToWatchOrRead: [
       {
         id: `provider-${platformInfo.platform}`,
         name: platformInfo.platformLabel,
         type: 'read',
-        url: url.trim(),
+        url: finalUrl,
         color: platformInfo.platformColor,
       },
     ],
