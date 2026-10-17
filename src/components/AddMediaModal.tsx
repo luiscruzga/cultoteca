@@ -34,6 +34,9 @@ import { MediaDetailModal } from './MediaDetailModal';
 import { remoteImageSource } from '../utils/remoteImage';
 import { isItemInList } from '../utils/mediaIdentity';
 import { PointsToastHost } from './PointsToast';
+import { EMPTY_EVENT_SCHEDULE, EventScheduleFields, EventScheduleValue, isoToSchedule, scheduleToIso } from './EventScheduleFields';
+import { ReminderPicker } from './ReminderPicker';
+import { DEFAULT_REMINDER_OFFSETS, setEventReminders } from '../services/eventReminderService';
 
 interface AddMediaModalProps {
   visible: boolean;
@@ -50,6 +53,8 @@ interface AddMediaModalProps {
   existingItems?: MediaItem[];
   /** URL recibida desde fuera (p. ej. compartida por otra app): abre la pestaña Enlace con la vista previa en curso. */
   initialLinkUrl?: string;
+  /** Lista de destino; se usa para que los avisos de un evento abran la lista al tocarlos. */
+  listId?: string;
 }
 
 const SEARCH_DEBOUNCE_MS = 2000;
@@ -67,6 +72,7 @@ const CATEGORIES: { key: MediaCategory; label: string; icon: string }[] = [
   { key: 'music', label: 'Música', icon: 'musical-notes' },
   { key: 'recipe', label: 'Receta', icon: 'restaurant' },
   { key: 'place', label: 'Lugar', icon: 'location' },
+  { key: 'event', label: 'Evento', icon: 'calendar' },
   { key: 'link', label: 'Enlace', icon: 'link' },
 ];
 
@@ -127,6 +133,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   allowedCategories = ALL_LIST_CONTENT_TYPES,
   existingItems = [],
   initialLinkUrl,
+  listId,
 }) => {
   const [preferredTab, setTab] = useState<'search' | 'link' | 'manual'>('search');
   const [newCatInput, setNewCatInput] = useState('');
@@ -160,9 +167,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     ...customCategoryOptions,
     ...(allowOther ? [{ key: 'other' as MediaCategory, label: 'Otro', icon: 'sparkles' }] : []),
   ];
+  // La pestaña Enlace guarda enlaces o eventos (publicaciones con fecha), según lo que admita la lista.
+  const allowsLink = allowedCategories.includes('link');
+  const allowsEvent = allowedCategories.includes('event');
   const availableTabs = [
     ...(searchableCategories.length > 0 ? (['search'] as const) : []),
-    ...(allowedCategories.includes('link') ? (['link'] as const) : []),
+    ...(allowsLink || allowsEvent ? (['link'] as const) : []),
     ...(allCategories.length > 0 || allowOther ? (['manual'] as const) : []),
   ];
   const tab = availableTabs.includes(preferredTab as never) ? preferredTab : availableTabs[0] ?? 'manual';
@@ -307,6 +317,27 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   const [linkRating, setLinkRating] = useState(5);
   const [linkPosterOverride, setLinkPosterOverride] = useState('');
   const linkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Evento: "Guardar como" en la pestaña Enlace, fecha/hora/lugar y avisos (compartidos con la entrada manual).
+  const [preferredLinkSaveAs, setLinkSaveAs] = useState<'link' | 'event'>('link');
+  const linkSaveAs: 'link' | 'event' = !allowsLink ? 'event' : !allowsEvent ? 'link' : preferredLinkSaveAs;
+  const [eventSchedule, setEventSchedule] = useState<EventScheduleValue>(EMPTY_EVENT_SCHEDULE);
+  const [isEventDateDetected, setEventDateDetected] = useState(false);
+  const [reminderOffsets, setReminderOffsets] = useState<number[]>(DEFAULT_REMINDER_OFFSETS);
+  // Una fecha elegida a mano no se pisa con la detectada en la publicación.
+  const scheduleTouchedRef = useRef(false);
+
+  const updateEventSchedule = (value: EventScheduleValue) => {
+    scheduleTouchedRef.current = true;
+    setEventDateDetected(false);
+    setEventSchedule(value);
+  };
+
+  const scheduleCreatorReminders = (item: MediaItem) => {
+    if (item.category !== 'event') return;
+    setEventReminders(currentUser.id, item, reminderOffsets, listId).catch(err =>
+      console.warn('[AddMediaModal] No se pudieron programar los avisos:', err)
+    );
+  };
 
   const handleFetchLinkPreview = async (urlToFetch?: string) => {
     const targetUrl = normalizeUrl(urlToFetch !== undefined ? urlToFetch : linkUrl);
@@ -318,6 +349,14 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       setLinkPreview(data);
       setLinkCustomTitle(data.title);
       setLinkCustomDesc(data.description);
+      if (!scheduleTouchedRef.current) {
+        if (data.eventStartsAt) {
+          setEventSchedule(prev => isoToSchedule(data.eventStartsAt!, Boolean(data.eventHasTime), prev.location));
+          setEventDateDetected(true);
+        } else {
+          setEventDateDetected(false);
+        }
+      }
     } catch (err) {
       console.warn('Error fetching link preview:', err);
     } finally {
@@ -373,8 +412,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     handleFetchLinkPreview(url);
   };
 
+  const eventIso = scheduleToIso(eventSchedule);
+  const canSaveLink =
+    Boolean(linkUrl.trim()) && Boolean(linkCustomTitle.trim()) && !isFetchingPreview && (linkSaveAs === 'link' || Boolean(eventIso));
+
   const handleSaveLink = () => {
-    if (!linkUrl.trim() || !linkCustomTitle.trim()) return;
+    if (!canSaveLink) return;
 
     const item = buildLinkMediaItem({
       url: normalizeUrl(linkUrl),
@@ -384,9 +427,14 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       previewData: linkPreview || undefined,
       currentUser,
       userRating: linkRating,
+      event:
+        linkSaveAs === 'event' && eventIso
+          ? { startsAt: eventIso, allDay: eventSchedule.allDay, location: eventSchedule.location }
+          : undefined,
     });
 
     onAddMedia(item);
+    scheduleCreatorReminders(item);
     handleClose();
   };
 
@@ -419,6 +467,8 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
 
   const handleSaveManual = () => {
     if (!manualTitle.trim()) return;
+    const isEvent = manualCategory === 'event';
+    if (isEvent && !eventIso) return;
 
     const provider: StreamingProvider = {
       id: `prov-${Date.now()}`,
@@ -435,7 +485,15 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
       id: `manual-${Date.now()}`,
       title: manualTitle.trim(),
       category: manualCategory,
-      year: parseInt(manualYear, 10) || new Date().getFullYear(),
+      year: isEvent ? new Date(eventIso!).getFullYear() : parseInt(manualYear, 10) || new Date().getFullYear(),
+      ...(isEvent
+        ? {
+            releaseDate: eventIso!.split('T')[0],
+            eventStartsAt: eventIso!,
+            eventAllDay: eventSchedule.allDay,
+            eventLocation: eventSchedule.location.trim() || undefined,
+          }
+        : {}),
       synopsis: manualSynopsis.trim() || 'Sin descripción ingresada.',
       posterUrl:
         manualPoster.trim() ||
@@ -453,6 +511,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     };
 
     onAddMedia(newItem);
+    scheduleCreatorReminders(newItem);
     handleClose();
   };
 
@@ -472,6 +531,11 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     setLinkCustomTitle('');
     setLinkCustomDesc('');
     setLinkPosterOverride('');
+    setLinkSaveAs('link');
+    setEventSchedule(EMPTY_EVENT_SCHEDULE);
+    setEventDateDetected(false);
+    setReminderOffsets(DEFAULT_REMINDER_OFFSETS);
+    scheduleTouchedRef.current = false;
     setManualTitle('');
     setManualSynopsis('');
     setManualLinks('');
@@ -725,8 +789,34 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                 cualquier artículo o página web. Obtendremos el título, la descripción y la miniatura (podrás
                 editarlos) y la publicación se reproducirá dentro de Cultoteca. También puedes compartir
                 directamente con Cultoteca desde esas apps.
+                {allowsEvent ? ' Si es un evento (concierto, estreno, feria…), guárdalo con su fecha para recibir avisos.' : ''}
               </Text>
             </View>
+
+            {allowsLink && allowsEvent ? (
+              <>
+                <Text style={styles.fieldLabel}>Guardar como</Text>
+                <View style={styles.segmentRow}>
+                  {(
+                    [
+                      { key: 'link', label: 'Enlace', icon: 'link' },
+                      { key: 'event', label: 'Evento con fecha', icon: 'calendar' },
+                    ] as const
+                  ).map(option => (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[styles.segmentBtn, linkSaveAs === option.key && styles.segmentBtnActive]}
+                      onPress={() => setLinkSaveAs(option.key)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: linkSaveAs === option.key }}
+                    >
+                      <Ionicons name={option.icon} size={15} color={linkSaveAs === option.key ? '#0F172A' : '#94A3B8'} />
+                      <Text style={[styles.segmentText, linkSaveAs === option.key && styles.segmentTextActive]}>{option.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : null}
 
             {/* URL Input */}
             <Text style={styles.fieldLabel}>URL del enlace o publicación *</Text>
@@ -878,6 +968,17 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                   <Text style={styles.ratingValueText}>{linkRating.toFixed(1)} / 5</Text>
                 </View>
 
+                {linkSaveAs === 'event' ? (
+                  <View style={styles.eventBlock}>
+                    <EventScheduleFields
+                      value={eventSchedule}
+                      onChange={updateEventSchedule}
+                      detectedFromPost={isEventDateDetected}
+                    />
+                    <ReminderPicker value={reminderOffsets} onChange={setReminderOffsets} />
+                  </View>
+                ) : null}
+
                 {/* Poster override */}
                 <Text style={styles.fieldLabel}>URL de portada o miniatura personalizada (opcional)</Text>
                 <TextInput
@@ -892,16 +993,13 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
 
             {/* Submit button */}
             <TouchableOpacity
-              style={[
-                styles.submitBtn,
-                (!linkUrl.trim() || !linkCustomTitle.trim() || isFetchingPreview) && styles.disabledBtn,
-              ]}
+              style={[styles.submitBtn, !canSaveLink && styles.disabledBtn]}
               onPress={handleSaveLink}
-              disabled={!linkUrl.trim() || !linkCustomTitle.trim() || isFetchingPreview}
+              disabled={!canSaveLink}
               activeOpacity={0.8}
             >
               <Ionicons name="checkmark-circle-outline" size={20} color="#0F172A" />
-              <Text style={styles.submitBtnText}>Agregar enlace a la lista</Text>
+              <Text style={styles.submitBtnText}>{linkSaveAs === 'event' ? 'Agregar evento a la lista' : 'Agregar enlace a la lista'}</Text>
             </TouchableOpacity>
           </ScrollView>
         ) : (
@@ -961,24 +1059,33 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
               ))}
             </View>
 
-            <Text style={styles.fieldLabel}>Año de Lanzamiento</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ej. 2024"
-              placeholderTextColor="#64748B"
-              keyboardType="numeric"
-              value={manualYear}
-              onChangeText={setManualYear}
-            />
+            {manualCategory === 'event' ? (
+              <View style={styles.eventBlock}>
+                <EventScheduleFields value={eventSchedule} onChange={updateEventSchedule} />
+                <ReminderPicker value={reminderOffsets} onChange={setReminderOffsets} />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Año de Lanzamiento</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ej. 2024"
+                  placeholderTextColor="#64748B"
+                  keyboardType="numeric"
+                  value={manualYear}
+                  onChangeText={setManualYear}
+                />
 
-            <Text style={styles.fieldLabel}>¿Dónde verlo o leerlo? (Plataforma / Tienda)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ej. Netflix, Prime Video, Biblioteca Municipal..."
-              placeholderTextColor="#64748B"
-              value={manualPlatform}
-              onChangeText={setManualPlatform}
-            />
+                <Text style={styles.fieldLabel}>¿Dónde verlo o leerlo? (Plataforma / Tienda)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ej. Netflix, Prime Video, Biblioteca Municipal..."
+                  placeholderTextColor="#64748B"
+                  value={manualPlatform}
+                  onChangeText={setManualPlatform}
+                />
+              </>
+            )}
 
             <Text style={styles.fieldLabel}>Tu Calificación Inicial (Estrellas)</Text>
             <View style={styles.ratingPickerRow}>
@@ -1023,9 +1130,9 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
             />
 
             <TouchableOpacity
-              style={[styles.submitBtn, !manualTitle.trim() && styles.disabledBtn]}
+              style={[styles.submitBtn, (!manualTitle.trim() || (manualCategory === 'event' && !eventIso)) && styles.disabledBtn]}
               onPress={handleSaveManual}
-              disabled={!manualTitle.trim()}
+              disabled={!manualTitle.trim() || (manualCategory === 'event' && !eventIso)}
             >
               <Ionicons name="checkmark-circle-outline" size={20} color="#0F172A" />
               <Text style={styles.submitBtnText}>Guardar y Compartir en la Lista</Text>
@@ -1496,6 +1603,43 @@ const styles = StyleSheet.create({
   },
   linkClearBtn: {
     padding: 4,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    padding: 4,
+    gap: 4,
+    marginBottom: 14,
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#38BDF8',
+  },
+  segmentText: {
+    color: '#94A3B8',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  segmentTextActive: {
+    color: '#0F172A',
+  },
+  eventBlock: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    gap: 4,
   },
   linkPasteBtn: {
     flexDirection: 'row',

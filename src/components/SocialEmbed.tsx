@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { LayoutChangeEvent, Linking, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { LinkEmbed } from '../utils/linkEmbeds';
+import { LinkEmbed, embedUrlFor } from '../utils/linkEmbeds';
 import { YouTubeEmbed } from './YouTubeEmbed';
 
 export interface SocialEmbedProps {
   embed: LinkEmbed;
+  /** Reproduce sin sonido (por defecto; la reproducción automática lo exige). */
+  muted?: boolean;
+  /** Ocupa todo el contenedor (pantalla completa) en vez de calcular la altura por relación de aspecto. */
+  fill?: boolean;
   /** El embed no se puede cargar (bloqueado, privado, error de red). */
   onError?: () => void;
   style?: StyleProp<ViewStyle>;
@@ -15,13 +19,13 @@ export interface SocialEmbedProps {
 const BROWSER_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-// Instagram no expone parámetro de autoplay: se pulsa el botón de reproducción y se arranca el <video> en silencio.
-const INSTAGRAM_AUTOPLAY_JS = `(function () {
+// Instagram no expone parámetro de autoplay: se pulsa el botón de reproducción y se arranca el <video>.
+const instagramAutoplayJs = (muted: boolean) => `(function () {
   function tryPlay() {
     var video = document.querySelector('video');
     if (video) {
-      video.muted = true;
-      video.setAttribute('muted', '');
+      video.muted = ${muted ? 'true' : 'false'};
+      ${muted ? "video.setAttribute('muted', '');" : "video.removeAttribute('muted'); video.volume = 1;"}
       video.setAttribute('playsinline', '');
       var p = video.play();
       if (p && p.catch) { p.catch(function () {}); }
@@ -53,9 +57,10 @@ export const computeEmbedHeight = (embed: LinkEmbed, width: number): number => {
  * Reproductor/widget oficial de la plataforma (TikTok, Instagram, X, Facebook, YouTube) dentro de un WebView,
  * con reproducción automática silenciada cuando la plataforma lo permite.
  */
-export const SocialEmbed: React.FC<SocialEmbedProps> = ({ embed, onError, style }) => {
+export const SocialEmbed: React.FC<SocialEmbedProps> = ({ embed, muted = true, fill = false, onError, style }) => {
   const [width, setWidth] = useState(0);
-  const height = width > 0 ? computeEmbedHeight(embed, width) : 0;
+  const height = width > 0 && !fill ? computeEmbedHeight(embed, width) : 0;
+  const embedUrl = embedUrlFor(embed, muted);
 
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
 
@@ -64,13 +69,13 @@ export const SocialEmbed: React.FC<SocialEmbedProps> = ({ embed, onError, style 
   };
 
   return (
-    <View style={[styles.container, style, height > 0 ? { height } : null]} onLayout={onLayout}>
+    <View style={[styles.container, fill && styles.fill, style, height > 0 ? { height } : null]} onLayout={onLayout}>
       {width > 0 && embed.kind === 'youtube' && embed.videoId ? (
-        <YouTubeEmbed videoId={embed.videoId} muted controls onError={onError} />
+        <YouTubeEmbed key={String(muted)} videoId={embed.videoId} muted={muted} controls onError={onError} />
       ) : width > 0 ? (
         <WebView
-          key={embed.embedUrl}
-          source={{ uri: embed.embedUrl }}
+          key={embedUrl}
+          source={{ uri: embedUrl }}
           style={styles.webview}
           userAgent={BROWSER_UA}
           javaScriptEnabled
@@ -82,7 +87,7 @@ export const SocialEmbed: React.FC<SocialEmbedProps> = ({ embed, onError, style 
           nestedScrollEnabled={Boolean(embed.fixedHeight)}
           bounces={false}
           setSupportMultipleWindows={false}
-          injectedJavaScript={embed.kind === 'instagram' ? INSTAGRAM_AUTOPLAY_JS : undefined}
+          injectedJavaScript={embed.kind === 'instagram' ? instagramAutoplayJs(muted) : undefined}
           onError={() => onError?.()}
           onHttpError={event => {
             if (event.nativeEvent.statusCode >= 400) onError?.();
@@ -113,6 +118,9 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#000',
     overflow: 'hidden',
+  },
+  fill: {
+    flex: 1,
   },
   webview: {
     flex: 1,

@@ -28,6 +28,8 @@ export interface LinkEmbed {
   allowedHosts: string[];
   /** La plataforma reproduce automáticamente (silenciado). */
   autoplay: boolean;
+  /** El embed tiene audio que se puede activar (parámetro de silencio o <video> controlable). */
+  supportsSound: boolean;
 }
 
 const parse = (url?: string | null): URL | null => {
@@ -68,6 +70,7 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
       aspectRatio: 16 / 9,
       allowedHosts: ['youtube.com', 'youtube-nocookie.com'],
       autoplay: true,
+      supportsSound: true,
     };
   }
 
@@ -82,6 +85,7 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
       maxHeight: 520,
       allowedHosts: ['tiktok.com'],
       autoplay: true,
+      supportsSound: true,
     };
   }
 
@@ -96,6 +100,7 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
       maxHeight: 560,
       allowedHosts: ['instagram.com'],
       autoplay: type !== 'p',
+      supportsSound: type !== 'p',
     };
   }
 
@@ -109,6 +114,7 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
       fixedHeight: 420,
       allowedHosts: ['platform.twitter.com', 'twitter.com', 'x.com'],
       autoplay: true,
+      supportsSound: false,
     };
   }
 
@@ -126,6 +132,7 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
         aspectRatio: 16 / 9,
         allowedHosts: ['facebook.com'],
         autoplay: true,
+        supportsSound: true,
       };
     }
     const isPost = /\/(posts|photos?|permalink\.php|story\.php|share)(\/|$)/.test(path) || parsed.searchParams.has('fbid') || parsed.searchParams.has('story_fbid');
@@ -137,11 +144,25 @@ export function resolveLinkEmbed(url?: string | null): LinkEmbed | null {
       fixedHeight: 480,
       allowedHosts: ['facebook.com'],
       autoplay: false,
+      supportsSound: false,
     };
   }
 
   return null;
 }
+
+/** URL del embed con o sin silencio (las plataformas que lo exponen como parámetro). */
+export const embedUrlFor = (embed: LinkEmbed, muted: boolean): string => {
+  if (muted) return embed.embedUrl;
+  switch (embed.kind) {
+    case 'tiktok':
+      return embed.embedUrl.replace('muted=1', 'muted=0');
+    case 'facebook-video':
+      return embed.embedUrl.replace('mute=true', 'mute=false');
+    default:
+      return embed.embedUrl;
+  }
+};
 
 export const describeEmbedKind = (kind: LinkEmbedKind): string =>
   ({

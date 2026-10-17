@@ -12,6 +12,7 @@ export const LIST_CONTENT_TYPES: { key: ListContentType; label: string; emoji: s
   { key: 'music', label: 'Música', emoji: '🎵' },
   { key: 'recipe', label: 'Recetas', emoji: '🍳' },
   { key: 'place', label: 'Lugares', emoji: '📍' },
+  { key: 'event', label: 'Eventos', emoji: '📅' },
   { key: 'link', label: 'Enlaces', emoji: '🔗' },
   { key: 'other', label: 'Otros', emoji: '✨' },
 ];

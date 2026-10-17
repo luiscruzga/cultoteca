@@ -1,5 +1,6 @@
 import { MediaItem } from '../../types';
 import { requestBackend } from './searchProxyService';
+import { extractEventDate } from '../../utils/eventDates';
 
 export type SocialPlatform = 'twitter' | 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'web';
 
@@ -18,6 +19,9 @@ export interface LinkPreviewData {
   platformIcon: string;
   faviconUrl?: string;
   isFallback?: boolean;
+  /** Fecha de evento sugerida (ISO) a partir de la página o del texto de la publicación. */
+  eventStartsAt?: string;
+  eventHasTime?: boolean;
 }
 
 interface PartialMetadata {
@@ -26,6 +30,8 @@ interface PartialMetadata {
   description?: string;
   imageUrl?: string;
   siteName?: string;
+  /** Fecha de inicio declarada por la página (`event:start_time` o JSON-LD `startDate`). */
+  eventStartsAt?: string;
 }
 
 // Fallback visual artwork by platform
@@ -267,6 +273,9 @@ function parseHtmlMetadata(html: string, pageUrl: string): PartialMetadata {
     if (!result.url && k === 'og:url') {
       result.url = toAbsoluteUrl(v, pageUrl);
     }
+    if (!result.eventStartsAt && (k === 'event:start_time' || k === 'og:start_time' || k === 'startdate')) {
+      result.eventStartsAt = v;
+    }
   };
 
   while ((match = metaRegex.exec(html)) !== null) {
@@ -284,8 +293,30 @@ function parseHtmlMetadata(html: string, pageUrl: string): PartialMetadata {
     }
   }
 
+  // JSON-LD de tipo Event: "startDate"
+  if (!result.eventStartsAt) {
+    const ldMatch = /<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi;
+    let ld: RegExpExecArray | null;
+    while (!result.eventStartsAt && (ld = ldMatch.exec(html)) !== null) {
+      const start = /"startDate"\s*:\s*"([^"]+)"/.exec(ld[1]);
+      if (start) result.eventStartsAt = start[1];
+    }
+  }
+
   return result;
 }
+
+/** Fecha de evento sugerida: la declarada por la página y, si no, la escrita en título/descripción. */
+const resolveEventDate = (meta: PartialMetadata): { eventStartsAt?: string; eventHasTime?: boolean } => {
+  if (meta.eventStartsAt) {
+    const d = new Date(meta.eventStartsAt);
+    if (!isNaN(d.getTime())) {
+      return { eventStartsAt: d.toISOString(), eventHasTime: /T\d{1,2}:\d{2}/.test(meta.eventStartsAt) };
+    }
+  }
+  const detected = extractEventDate([meta.title, meta.description].filter(Boolean).join('. '));
+  return detected ? { eventStartsAt: detected.iso, eventHasTime: detected.hasTime } : {};
+};
 
 /** Títulos genéricos que devuelven las páginas de login o de bloqueo: no aportan nada. */
 const GENERIC_TITLES = ['instagram', 'facebook', 'log in', 'iniciar sesión', 'tiktok', 'x', 'twitter'];
@@ -469,6 +500,7 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreviewData>
       imageUrl: meta.imageUrl || fallback.imageUrl,
       siteName: meta.siteName || fallback.siteName,
       isFallback,
+      ...resolveEventDate(meta),
     };
   };
 
@@ -500,6 +532,13 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreviewData>
 /**
  * Converts a preview and user customizations into a standardized MediaItem.
  */
+export interface LinkEventParams {
+  startsAt: string;
+  endsAt?: string;
+  allDay?: boolean;
+  location?: string;
+}
+
 export function buildLinkMediaItem(params: {
   url: string;
   title: string;
@@ -508,8 +547,10 @@ export function buildLinkMediaItem(params: {
   previewData?: LinkPreviewData;
   currentUser: { id: string; name: string; avatar?: string };
   userRating?: number;
+  /** Con fecha: el ítem se guarda como evento en vez de como enlace. */
+  event?: LinkEventParams;
 }): MediaItem {
-  const { url, title, description, imageUrl, previewData, currentUser, userRating } = params;
+  const { url, title, description, imageUrl, previewData, currentUser, userRating, event } = params;
   const typedUrl = url.trim();
   // The canonical URL of the preview (short links resolved) is the one stored; the typed one stays as a link.
   const previewMatchesInput =
@@ -528,17 +569,27 @@ export function buildLinkMediaItem(params: {
   const externalLinks = [{ label: `Visitar en ${platformInfo.platformLabel}`, url: finalUrl }];
   if (finalUrl !== typedUrl) externalLinks.push({ label: 'Enlace original', url: typedUrl });
 
+  const eventDate = event ? new Date(event.startsAt) : null;
+
   return {
-    id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: `${event ? 'event' : 'link'}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     title: title.trim() || platformInfo.cleanDomain,
     originalTitle: previewData?.title || title.trim(),
-    category: 'link',
-    year: currentYear,
-    releaseDate: now.split('T')[0],
+    category: event ? 'event' : 'link',
+    year: eventDate && !isNaN(eventDate.getTime()) ? eventDate.getFullYear() : currentYear,
+    releaseDate: eventDate && !isNaN(eventDate.getTime()) ? event!.startsAt.split('T')[0] : now.split('T')[0],
     synopsis: description.trim(),
     posterUrl: finalImage,
     backdropUrl: finalImage,
-    genres: ['Enlace', platformInfo.platformLabel],
+    genres: [event ? 'Evento' : 'Enlace', platformInfo.platformLabel],
+    ...(event
+      ? {
+          eventStartsAt: event.startsAt,
+          eventEndsAt: event.endsAt,
+          eventAllDay: Boolean(event.allDay),
+          eventLocation: event.location?.trim() || undefined,
+        }
+      : {}),
     averageRating: userRating || 0,
     ratingsCount: userRating ? 1 : 0,
     userRating,

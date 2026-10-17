@@ -29,8 +29,12 @@ import { PointsToastHost } from './PointsToast';
 import { TrailerHero } from './TrailerHero';
 import { TrailerPlayerModal } from './TrailerPlayerModal';
 import { fetchTrailerKey, hasTrailerSupport } from '../services/api/trailerService';
-import { SocialEmbed } from './SocialEmbed';
+import { LinkEmbedHero } from './LinkEmbedHero';
+import { SocialEmbedPlayerModal } from './SocialEmbedPlayerModal';
+import { ReminderPicker } from './ReminderPicker';
 import { resolveLinkEmbed } from '../utils/linkEmbeds';
+import { buildGoogleCalendarUrl, formatCountdown, formatEventDateLong } from '../utils/eventDates';
+import { canScheduleReminders, getEventReminderOffsets, setEventReminders } from '../services/eventReminderService';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -136,6 +140,21 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [trailerPlayerItemId, setTrailerPlayerItemId] = useState<string | null>(null);
   // Ítem de tipo enlace cuyo embed falló: se vuelve a la miniatura (el estado no se arrastra a otro ítem).
   const [embedFailedItemId, setEmbedFailedItemId] = useState<string | null>(null);
+  // Ítem cuyo embed social está abierto a pantalla completa (con sonido).
+  const [embedPlayerItemId, setEmbedPlayerItemId] = useState<string | null>(null);
+  // Recordatorios del usuario actual para el evento abierto (se cargan del dispositivo).
+  const [eventReminders, setEventReminders_] = useState<{ itemId: string; offsets: number[]; scheduled?: number } | null>(null);
+
+  useEffect(() => {
+    if (!item || !visible || item.category !== 'event' || !currentUser) return;
+    let cancelled = false;
+    getEventReminderOffsets(currentUser.id, item.id).then(offsets => {
+      if (!cancelled) setEventReminders_({ itemId: item.id, offsets });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item, visible, currentUser]);
 
   useEffect(() => {
     if (!item || !visible || !hasTrailerSupport(item)) return;
@@ -152,7 +171,18 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const trailerKey = trailer?.itemId === item.id ? trailer.key : null;
   // Reproductor/publicación embebida de la plataforma para ítems de tipo enlace (derivado de la URL guardada).
-  const linkEmbed = item.category === 'link' && embedFailedItemId !== item.id ? resolveLinkEmbed(item.url) : null;
+  const linkEmbed =
+    (item.category === 'link' || item.category === 'event') && embedFailedItemId !== item.id ? resolveLinkEmbed(item.url) : null;
+  const isEmbedPlayerVisible = Boolean(linkEmbed) && embedPlayerItemId === item.id;
+  const eventCountdown = item.category === 'event' && item.eventStartsAt ? formatCountdown(item.eventStartsAt, item.eventAllDay) : null;
+  const reminderOffsets = eventReminders?.itemId === item.id ? eventReminders.offsets : null;
+
+  const handleReminderChange = async (offsets: number[]) => {
+    if (!currentUser) return;
+    setEventReminders_({ itemId: item.id, offsets });
+    const { scheduled } = await setEventReminders(currentUser.id, item, offsets);
+    setEventReminders_(prev => (prev && prev.itemId === item.id ? { ...prev, scheduled } : prev));
+  };
   const isTrailerPlayerVisible = Boolean(trailerKey) && trailerPlayerItemId === item.id;
 
   const providers =
@@ -270,10 +300,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
             />
           ) : null}
 
-          {/* Enlace social: reproducción automática (silenciada) del embed oficial de la plataforma */}
-          {linkEmbed ? (
+          {/* Enlace social: embed oficial en silencio, con botones de sonido y pantalla completa.
+              Mientras está abierto a pantalla completa se desmonta para no duplicar el audio. */}
+          {linkEmbed && !isEmbedPlayerVisible ? (
             <View style={styles.linkEmbedHero}>
-              <SocialEmbed key={item.id} embed={linkEmbed} onError={() => setEmbedFailedItemId(item.id)} />
+              <LinkEmbedHero
+                key={item.id}
+                embed={linkEmbed}
+                title={item.title}
+                onError={() => setEmbedFailedItemId(item.id)}
+                onOpenFullscreen={() => setEmbedPlayerItemId(item.id)}
+              />
             </View>
           ) : null}
 
@@ -300,7 +337,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 {item.year ? `${item.year} • ` : ''}{item.category.toUpperCase()}
               </Text>
 
-              {item.releaseDate ? (
+              {item.releaseDate && item.category !== 'event' ? (
                 <View style={styles.releaseDateRow}>
                   <Ionicons name="calendar-outline" size={13} color="#94A3B8" />
                   <Text style={styles.releaseDateText}>
@@ -342,7 +379,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 </View>
               )}
 
-              {item.category === 'link' ? (
+              {item.category === 'event' ? (
+                <View style={[styles.manualTag, { backgroundColor: '#F43F5E20' }]}>
+                  <Ionicons name="calendar" size={11} color="#FB7185" />
+                  <Text style={[styles.manualTagText, { color: '#FB7185' }]}>
+                    {item.siteName ? `Evento de ${item.siteName}` : 'Evento'}
+                  </Text>
+                </View>
+              ) : item.category === 'link' ? (
                 <View style={[styles.manualTag, { backgroundColor: '#0284C720' }]}>
                   <Ionicons name="link" size={11} color="#38BDF8" />
                   <Text style={[styles.manualTagText, { color: '#38BDF8' }]}>
@@ -373,6 +417,68 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </Text>
             </TouchableOpacity>
           )}
+
+          {/* Evento: fecha, cuenta atrás, lugar, calendario y recordatorios personales */}
+          {item.category === 'event' && item.eventStartsAt ? (
+            <View style={styles.eventCard}>
+              <View style={styles.eventHeaderRow}>
+                <Ionicons name="calendar" size={18} color="#FB7185" />
+                <Text style={styles.eventDateText}>{formatEventDateLong(item.eventStartsAt, item.eventAllDay)}</Text>
+              </View>
+              {eventCountdown?.label ? (
+                <View style={[styles.eventCountdownPill, eventCountdown.isPast && styles.eventCountdownPillPast]}>
+                  <Ionicons name={eventCountdown.isPast ? 'time-outline' : 'hourglass-outline'} size={13} color={eventCountdown.isPast ? '#94A3B8' : '#0F172A'} />
+                  <Text style={[styles.eventCountdownText, eventCountdown.isPast && styles.eventCountdownTextPast]}>{eventCountdown.label}</Text>
+                </View>
+              ) : null}
+              {item.eventAllDay ? <Text style={styles.eventMetaText}>Todo el día</Text> : null}
+              {item.eventLocation ? (
+                <View style={styles.eventMetaRow}>
+                  <Ionicons name="location-outline" size={14} color="#94A3B8" />
+                  <Text style={styles.eventMetaText}>{item.eventLocation}</Text>
+                </View>
+              ) : null}
+              <TouchableOpacity
+                style={styles.eventCalendarBtn}
+                activeOpacity={0.8}
+                onPress={() =>
+                  openUrl(
+                    buildGoogleCalendarUrl({
+                      title: item.title,
+                      startsAt: item.eventStartsAt!,
+                      endsAt: item.eventEndsAt,
+                      allDay: item.eventAllDay,
+                      location: item.eventLocation,
+                      details: [item.synopsis, item.url].filter(Boolean).join('\n'),
+                    })
+                  )
+                }
+              >
+                <Ionicons name="calendar-outline" size={16} color="#0F172A" />
+                <Text style={styles.eventCalendarBtnText}>Añadir a mi calendario</Text>
+              </TouchableOpacity>
+
+              {currentUser && !onAddMedia ? (
+                <View style={styles.eventRemindersBlock}>
+                  <Text style={styles.eventRemindersTitle}>Avísame</Text>
+                  {eventCountdown?.isPast ? (
+                    <Text style={styles.eventMetaText}>El evento ya pasó: no se programan avisos.</Text>
+                  ) : reminderOffsets ? (
+                    <>
+                      <ReminderPicker value={reminderOffsets} onChange={handleReminderChange} compact />
+                      {eventReminders?.scheduled !== undefined ? (
+                        <Text style={styles.eventMetaText}>
+                          {canScheduleReminders()
+                            ? `${eventReminders.scheduled} ${eventReminders.scheduled === 1 ? 'aviso programado' : 'avisos programados'} en este dispositivo.`
+                            : 'Los avisos solo se programan en la app Android con permiso de notificaciones.'}
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {/* Add to list CTA if in search preview mode */}
           {onAddMedia && isAlreadyInList && (
@@ -408,7 +514,9 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 color={isWatched ? '#10B981' : '#94A3B8'}
               />
               <Text style={[styles.watchedDetailBtnText, isWatched && styles.watchedDetailBtnTextActive]}>
-                {isWatched
+                {item.category === 'event'
+                  ? (isWatched ? '✓ Ya has asistido' : 'Marcar como asistido')
+                  : isWatched
                   ? (item.category === 'link' || item.category === 'book' || item.category === 'manga'
                       ? '✓ Ya lo has leído'
                       : item.category === 'game' || item.category === 'boardgame'
@@ -864,12 +972,21 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   );
 
   const trailerPlayer = (
-    <TrailerPlayerModal
-      videoId={trailerKey}
-      title={item.title}
-      visible={isTrailerPlayerVisible}
-      onClose={() => setTrailerPlayerItemId(null)}
-    />
+    <>
+      <TrailerPlayerModal
+        videoId={trailerKey}
+        title={item.title}
+        visible={isTrailerPlayerVisible}
+        onClose={() => setTrailerPlayerItemId(null)}
+      />
+      <SocialEmbedPlayerModal
+        embed={linkEmbed}
+        url={item.url}
+        title={item.title}
+        visible={isEmbedPlayerVisible}
+        onClose={() => setEmbedPlayerItemId(null)}
+      />
+    </>
   );
 
   const personModal = selectedPerson && (
@@ -1002,6 +1119,83 @@ const styles = StyleSheet.create({
     marginTop: -20,
     marginBottom: 16,
     backgroundColor: '#000',
+  },
+  eventCard: {
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#F43F5E55',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    gap: 10,
+  },
+  eventHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eventDateText: {
+    flex: 1,
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  eventCountdownPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#FB7185',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  eventCountdownPillPast: {
+    backgroundColor: '#334155',
+  },
+  eventCountdownText: {
+    color: '#0F172A',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  eventCountdownTextPast: {
+    color: '#94A3B8',
+  },
+  eventMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  eventMetaText: {
+    color: '#94A3B8',
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  eventCalendarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FB7185',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  eventCalendarBtnText: {
+    color: '#0F172A',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  eventRemindersBlock: {
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    paddingTop: 10,
+    gap: 8,
+  },
+  eventRemindersTitle: {
+    color: '#CBD5E1',
+    fontWeight: '700',
+    fontSize: 14,
   },
   heroSection: {
     flexDirection: 'row',

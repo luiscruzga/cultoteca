@@ -9,7 +9,7 @@ interface ShareTargetListPickerModalProps {
   visible: boolean;
   /** Enlace recibido desde otra aplicación. */
   url: string;
-  /** Listas donde el usuario puede aportar enlaces. */
+  /** Listas donde el usuario puede aportar enlaces o eventos. */
   destinations: ShareDestination[];
   onSelect: (list: CollaborativeList) => void;
   onCreateList: () => void;
@@ -55,9 +55,9 @@ export const ShareTargetListPickerModal: React.FC<ShareTargetListPickerModalProp
           {destinations.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="albums-outline" size={34} color="#64748B" />
-              <Text style={styles.emptyTitle}>No tienes listas que acepten enlaces</Text>
+              <Text style={styles.emptyTitle}>No tienes listas que acepten enlaces o eventos</Text>
               <Text style={styles.emptyText}>
-                Crea una lista (o una que admita contenido de tipo Enlaces) para guardar lo que compartes desde
+                Crea una lista (o permite Enlaces o Eventos en una existente) para guardar lo que compartes desde
                 otras apps.
               </Text>
               <TouchableOpacity style={styles.createBtn} onPress={onCreateList} activeOpacity={0.85}>

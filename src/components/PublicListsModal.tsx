@@ -33,6 +33,7 @@ const CATEGORY_CHIPS: { id: MediaCategory | 'all'; label: string; icon: any }[] 
   { id: 'manga', label: 'Manga', icon: 'book-outline' },
   { id: 'book', label: 'Libros', icon: 'library-outline' },
   { id: 'game', label: 'Gaming', icon: 'game-controller-outline' },
+  { id: 'event', label: 'Eventos', icon: 'calendar-outline' },
   { id: 'link', label: 'Enlaces', icon: 'link-outline' },
 ];
 

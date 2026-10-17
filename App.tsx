@@ -25,6 +25,7 @@ import { AppUpdatesModal } from './src/components/AppUpdatesModal';
 import { ShareDestination } from './src/components/ShareItemModal';
 import { ShareTargetListPickerModal } from './src/components/ShareTargetListPickerModal';
 import { extractFirstUrl } from './src/services/api/linkPreviewService';
+import { cancelEventReminders } from './src/services/eventReminderService';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import { AuthModal } from './src/components/AuthModal';
 import { BadgesModal } from './src/components/BadgesModal';
@@ -203,11 +204,15 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     setIsShareTargetPickerVisible(true);
   }, [pendingSharedUrl, profile, listsLoadedFor, isListsLoading]);
 
-  // Listas del usuario que aceptan enlaces y en las que puede aportar.
+  // Listas del usuario que aceptan enlaces o eventos y en las que puede aportar.
   const shareTargetDestinations: ShareDestination[] = useMemo(() => {
     if (!profile) return [];
     return homeLists
-      .filter(l => StorageService.canUserContribute(l, profile.id, followedListIds) && isCategoryAllowed(l, 'link'))
+      .filter(
+        l =>
+          StorageService.canUserContribute(l, profile.id, followedListIds) &&
+          (isCategoryAllowed(l, 'link') || isCategoryAllowed(l, 'event'))
+      )
       .map(l => ({
         list: l,
         relation: l.owner.id === profile.id ? 'owner' : l.collaborators.some(c => c.id === profile.id) ? 'collaborator' : 'follower',
@@ -653,6 +658,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
 
   const handleDeleteItem = async (mediaId: string) => {
     if (!selectedList || !profile) return;
+    const removedItem = selectedList.items.find(i => i.id === mediaId);
     let updated: CollaborativeList[];
     try {
       updated = await StorageService.removeItemFromList(selectedList.id, mediaId, {
@@ -670,6 +676,9 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
     if (target) setSelectedList(target);
     setIsDetailVisible(false);
     setSelectedMedia(null);
+    if (removedItem?.category === 'event') {
+      cancelEventReminders(profile.id, mediaId).catch(() => undefined);
+    }
     await refreshNotificationsCount();
   };
 
@@ -1656,6 +1665,7 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           allowedCategories={getAllowedCategories(selectedList)}
           existingItems={selectedList?.items ?? []}
           initialLinkUrl={addMediaInitialUrl}
+          listId={selectedList?.id}
         />
       )}
 

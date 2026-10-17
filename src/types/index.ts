@@ -10,6 +10,7 @@ export type StandardMediaCategory =
   | 'music'
   | 'recipe'
   | 'place'
+  | 'event'
   | 'link';
 export type MediaCategory = StandardMediaCategory | (string & {});
 /** Content types a list accepts: the standard categories plus 'other' (any manual/custom content). */
@@ -108,6 +109,10 @@ export interface MediaItem {
   externalLinks?: { label: string; url: string }[];
   url?: string; // URL directa para medios de tipo enlace
   siteName?: string; // Nombre del sitio o plataforma (ej. X, Instagram, YouTube)
+  eventStartsAt?: string; // Inicio del evento (ISO) para la categoría 'event'
+  eventEndsAt?: string; // Fin del evento (ISO), opcional
+  eventAllDay?: boolean; // Evento de día completo (sin hora)
+  eventLocation?: string; // Lugar del evento
   isManualEntry: boolean;
   isWatched?: boolean;
   watchedAt?: string;

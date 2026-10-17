@@ -33,6 +33,7 @@ const CATEGORY_META: Record<string, { label: string; icon: string; color: string
   music: { label: 'Música', icon: 'musical-notes-outline', color: '#EC4899' },
   recipe: { label: 'Receta', icon: 'restaurant-outline', color: '#EAB308' },
   place: { label: 'Lugar', icon: 'location-outline', color: '#14B8A6' },
+  event: { label: 'Evento', icon: 'calendar-outline', color: '#FB7185' },
   link: { label: 'Enlace', icon: 'link-outline', color: '#38BDF8' },
 };
 
@@ -67,6 +68,8 @@ const getWatchedLabel = (category: string, uppercase: boolean = false): string =
       return uppercase ? 'COCINADO' : 'Cocinado';
     case 'place':
       return uppercase ? 'VISITADO' : 'Visitado';
+    case 'event':
+      return uppercase ? 'ASISTIDO' : 'Asistido';
     default:
       return uppercase ? 'VISTO' : 'Visto';
   }
@@ -91,7 +94,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const isBookOrManga = item.category === 'book' || item.category === 'manga';
   const isGame = item.category === 'game';
-  const isLink = item.category === 'link';
+  const isLink = item.category === 'link' || item.category === 'event';
   const targetUrl = item.url || item.externalLinks?.[0]?.url;
   const releaseBadge = formatReleaseBadge(item);
   const criticRating = getCriticRating(item);

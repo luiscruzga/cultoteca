@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { formatCountdown, formatEventDateShort } from '../utils/eventDates';
 import { MediaItem, ReleaseEpisodeInfo, ReleaseChapterInfo, ReleaseTrackingInfo } from '../types';
 import { fetchTvShowNextEpisode } from './api/tmdbService';
 import { fetchMangaLatestChapter } from './api/mangaDexService';
@@ -189,6 +190,16 @@ export const formatReleaseBadge = (
   item: MediaItem
 ): { label: string; date?: string; isUpcoming: boolean; isEnded?: boolean } | null => {
   const tracking = item.trackingInfo;
+
+  if (item.category === 'event' && item.eventStartsAt) {
+    const countdown = formatCountdown(item.eventStartsAt, item.eventAllDay);
+    return {
+      label: `${formatEventDateShort(item.eventStartsAt, item.eventAllDay)}${countdown.label ? ` • ${countdown.label}` : ''}`,
+      date: item.eventStartsAt,
+      isUpcoming: !countdown.isPast,
+      isEnded: countdown.isPast,
+    };
+  }
 
   if (item.category === 'series') {
     if (tracking?.nextEpisode?.airDate) {

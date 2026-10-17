@@ -71,6 +71,7 @@ const MESSAGES_BY_CATEGORY: Record<MediaCategory | 'all', string[]> = {
     'Obteniendo fotografías y sinopsis geográfica...',
     'Recuperando coordenadas y datos de interés turístico...',
   ],
+  event: ['Preparando la agenda cultural...', 'Buscando fechas...'],
   link: [
     'Obteniendo previsualización del enlace...',
     'Extrayendo título, descripción y portada...',
