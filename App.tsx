@@ -113,6 +113,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const [platformFilter, setPlatformFilter] = useState<string>('all');
   // Vista "Eventos pasados" de la lista activa; se guarda con el id de lista para no arrastrarla a otra.
   const [pastEventsView, setPastEventsView] = useState<{ listId: string; active: boolean }>({ listId: '', active: false });
+  // Solo pendientes: oculta lo que el usuario actual ya marcó como visto.
+  const [hideWatched, setHideWatched] = useState(false);
 
   // Modal States
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
@@ -935,6 +937,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
   const isHiddenPastEvent = (item: MediaItem) => item.eventHideWhenPast === true && isPastEvent(item);
   const showPastEvents = Boolean(selectedList) && pastEventsView.listId === selectedList?.id && pastEventsView.active && pastEvents.length > 0;
   const visibleListItems = selectedList ? selectedList.items.filter(item => !isHiddenPastEvent(item)) : [];
+  const watchedVisibleCount = profile ? visibleListItems.filter(isWatchedByMe).length : 0;
+  const isHidingWatched = Boolean(profile) && hideWatched && !showPastEvents;
   const filteredItems = !selectedList
     ? []
     : showPastEvents
@@ -947,7 +951,8 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
           const matchesPlatform =
             platformFilter === 'all' ||
             item.whereToWatchOrRead.some(p => p.name.toLowerCase().includes(platformFilter.toLowerCase()));
-          return matchesCategory && matchesPlatform && matchesItemQuery(item);
+          const matchesPending = !isHidingWatched || !isWatchedByMe(item);
+          return matchesCategory && matchesPlatform && matchesPending && matchesItemQuery(item);
         }),
         itemSortMode
       );
@@ -1232,219 +1237,6 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             </ScrollView>
           ) : (
             <>
-              {/* Current List Header & Tools */}
-              {selectedList && (
-            <View style={styles.activeListHeader}>
-              <View style={styles.listTitleBlock}>
-                <Text style={styles.currentListTitle} numberOfLines={2}>
-                  {selectedList.title}
-                </Text>
-                {!!selectedList.description && (
-                  <Text style={styles.currentListDesc} numberOfLines={2}>
-                    {selectedList.description}
-                  </Text>
-                )}
-                <View style={styles.listMetaRow}>
-                  <View style={styles.listMetaPill}>
-                    <Ionicons
-                      name={selectedList.isPublic ? 'earth-outline' : 'lock-closed-outline'}
-                      size={11}
-                      color="#94A3B8"
-                    />
-                    <Text style={styles.listMetaText}>{selectedList.isPublic ? 'Pública' : 'Privada'}</Text>
-                  </View>
-                  <View style={styles.listMetaPill}>
-                    <Ionicons
-                      name={selectedList.allowContributions === false ? 'person-outline' : 'people-outline'}
-                      size={11}
-                      color="#94A3B8"
-                    />
-                    <Text style={styles.listMetaText}>
-                      {selectedList.allowContributions === false ? 'Solo el dueño aporta' : 'Aportes abiertos'}
-                    </Text>
-                  </View>
-                  <View style={[styles.listMetaPill, { flexShrink: 1 }]}>
-                    <Ionicons name="pricetags-outline" size={11} color="#94A3B8" />
-                    <Text style={styles.listMetaText} numberOfLines={1}>
-                      {describeAllowedCategories(getAllowedCategories(selectedList))}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.listActionBar}>
-                <View style={styles.listSecondaryActions}>
-                  <TouchableOpacity
-                    style={styles.visibilityListBtn}
-                    onPress={() => setIsListMembersVisible(true)}
-                    activeOpacity={0.8}
-                    accessibilityLabel="Ver miembros de la lista"
-                  >
-                    <Ionicons name="people-outline" size={14} color="#CBD5E1" />
-                    <Text style={styles.visibilityListBtnText}>Miembros</Text>
-                  </TouchableOpacity>
-                  {profile && StorageService.canUserDeleteList(selectedList, profile.id) ? (
-                    <>
-                    <TouchableOpacity
-                      style={styles.visibilityListBtn}
-                      onPress={() => openEditList(selectedList)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="Editar lista"
-                    >
-                      <Ionicons name="create-outline" size={14} color="#CBD5E1" />
-                      <Text style={styles.visibilityListBtnText}>Editar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.inviteListBtn}
-                      onPress={() => setIsInviteUsersVisible(true)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="Invitar usuarios a la lista"
-                    >
-                      <Ionicons name="person-add-outline" size={14} color="#38BDF8" />
-                      <Text style={styles.inviteListBtnText}>
-                        Invitar{selectedList.pendingInvites?.length ? ` (${selectedList.pendingInvites.length})` : ''}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.deleteListBtn}
-                      onPress={() => setIsDeleteListConfirmVisible(true)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="Eliminar lista"
-                    >
-                      <Ionicons name="trash-outline" size={14} color="#F87171" />
-                      <Text style={styles.deleteListBtnText}>Eliminar</Text>
-                    </TouchableOpacity>
-                    </>
-                  ) : profile ? (
-                    <TouchableOpacity
-                      style={[
-                        styles.followListBtn,
-                        followedListIds.includes(selectedList.id) && styles.followListBtnActive,
-                      ]}
-                      onPress={() => handleToggleFollowList(selectedList.id)}
-                      activeOpacity={0.8}
-                      accessibilityLabel={
-                        followedListIds.includes(selectedList.id)
-                          ? 'Dejar de seguir lista'
-                          : 'Seguir lista'
-                      }
-                    >
-                      <Ionicons
-                        name={followedListIds.includes(selectedList.id) ? 'bookmark' : 'bookmark-outline'}
-                        size={14}
-                        color={followedListIds.includes(selectedList.id) ? '#38BDF8' : '#94A3B8'}
-                      />
-                      <Text
-                        style={[
-                          styles.followListBtnText,
-                          followedListIds.includes(selectedList.id) && styles.followListBtnTextActive,
-                        ]}
-                      >
-                        {followedListIds.includes(selectedList.id) ? 'Siguiendo' : 'Seguir'}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.followListBtn}
-                      onPress={() => setIsAuthModalVisible(true)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="Inicia sesión para seguir la lista"
-                    >
-                      <Ionicons name="bookmark-outline" size={14} color="#94A3B8" />
-                      <Text style={styles.followListBtnText}>Seguir</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {/* Roulette button "¿Qué vemos hoy?" */}
-                <TouchableOpacity
-                  style={styles.rouletteButton}
-                  onPress={() => setIsRouletteVisible(true)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="dice" size={18} color="#0F172A" />
-                  <Text style={styles.rouletteButtonText}>¿Qué vemos hoy?</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Category Filter Chips */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
-                <TouchableOpacity
-                  style={[styles.filterChip, activeCategoryFilter === 'all' && styles.activeFilterChip]}
-                  onPress={() => setCategoryFilter('all')}
-                >
-                  <Text style={[styles.filterChipText, activeCategoryFilter === 'all' && styles.activeFilterChipText]}>
-                    Todos ({visibleListItems.length})
-                  </Text>
-                </TouchableOpacity>
-                {pastEvents.length > 0 ? (
-                  <TouchableOpacity
-                    style={[styles.filterChip, styles.pastEventsChip, showPastEvents && styles.pastEventsChipActive]}
-                    onPress={() => setPastEventsView({ listId: selectedList.id, active: !showPastEvents })}
-                    accessibilityState={{ selected: showPastEvents }}
-                    accessibilityLabel="Ver eventos pasados"
-                  >
-                    <Text style={[styles.filterChipText, showPastEvents && styles.pastEventsChipTextActive]}>
-                      🕘 Eventos pasados ({pastEvents.length})
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-                {LIST_CONTENT_TYPES.filter(
-                  type => type.key !== 'other' && getAllowedCategories(selectedList).includes(type.key)
-                ).map(type => (
-                  <TouchableOpacity
-                    key={type.key}
-                    style={[styles.filterChip, categoryFilter === type.key && styles.activeFilterChip]}
-                    onPress={() => setCategoryFilter(type.key as MediaCategory)}
-                  >
-                    <Text style={[styles.filterChipText, categoryFilter === type.key && styles.activeFilterChipText]}>
-                      {type.emoji} {type.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* In-list search & sorting */}
-              <View style={styles.itemSearchBar}>
-                <Ionicons name="search" size={16} color="#64748B" />
-                <TextInput
-                  style={styles.itemSearchInput}
-                  placeholder="Buscar en esta lista..."
-                  placeholderTextColor="#64748B"
-                  value={itemSearchQuery}
-                  onChangeText={setItemSearchQuery}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="search"
-                  accessibilityLabel="Buscar dentro de la lista"
-                />
-                {!!itemSearchQuery && (
-                  <TouchableOpacity onPress={() => setItemSearchQuery('')} accessibilityLabel="Limpiar búsqueda">
-                    <Ionicons name="close-circle" size={18} color="#64748B" />
-                  </TouchableOpacity>
-                )}
-              </View>
-              <View style={styles.sortRow}>
-                <Ionicons name="swap-vertical" size={14} color="#64748B" />
-                {([
-                  { mode: 'recent', label: 'Recientes' },
-                  { mode: 'list', label: '★ Lista' },
-                  { mode: 'critic', label: '★ Crítica' },
-                ] as { mode: ItemSortMode; label: string }[]).map(option => (
-                  <TouchableOpacity
-                    key={option.mode}
-                    style={[styles.sortChip, itemSortMode === option.mode && styles.sortChipActive]}
-                    onPress={() => setItemSortMode(option.mode)}
-                    accessibilityState={{ selected: itemSortMode === option.mode }}
-                  >
-                    <Text style={[styles.sortChipText, itemSortMode === option.mode && styles.sortChipTextActive]}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
 
           {/* Media Items List, grouped by content type */}
           <SectionList
@@ -1452,6 +1244,238 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
             keyExtractor={item => item.id}
             contentContainerStyle={styles.mediaItemsList}
             stickySectionHeadersEnabled={false}
+            keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              selectedList ? (
+                <View style={styles.activeListHeader}>
+                  <View style={styles.listTitleBlock}>
+                    <Text style={styles.currentListTitle} numberOfLines={2}>
+                      {selectedList.title}
+                    </Text>
+                    {!!selectedList.description && (
+                      <Text style={styles.currentListDesc} numberOfLines={2}>
+                        {selectedList.description}
+                      </Text>
+                    )}
+                    <View style={styles.listMetaRow}>
+                      <View style={styles.listMetaPill}>
+                        <Ionicons
+                          name={selectedList.isPublic ? 'earth-outline' : 'lock-closed-outline'}
+                          size={11}
+                          color="#94A3B8"
+                        />
+                        <Text style={styles.listMetaText}>{selectedList.isPublic ? 'Pública' : 'Privada'}</Text>
+                      </View>
+                      <View style={styles.listMetaPill}>
+                        <Ionicons
+                          name={selectedList.allowContributions === false ? 'person-outline' : 'people-outline'}
+                          size={11}
+                          color="#94A3B8"
+                        />
+                        <Text style={styles.listMetaText}>
+                          {selectedList.allowContributions === false ? 'Solo el dueño aporta' : 'Aportes abiertos'}
+                        </Text>
+                      </View>
+                      <View style={[styles.listMetaPill, { flexShrink: 1 }]}>
+                        <Ionicons name="pricetags-outline" size={11} color="#94A3B8" />
+                        <Text style={styles.listMetaText} numberOfLines={1}>
+                          {describeAllowedCategories(getAllowedCategories(selectedList))}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.listActionBar}>
+                    <View style={styles.listSecondaryActions}>
+                      <TouchableOpacity
+                        style={styles.visibilityListBtn}
+                        onPress={() => setIsListMembersVisible(true)}
+                        activeOpacity={0.8}
+                        accessibilityLabel="Ver miembros de la lista"
+                      >
+                        <Ionicons name="people-outline" size={14} color="#CBD5E1" />
+                        <Text style={styles.visibilityListBtnText}>Miembros</Text>
+                      </TouchableOpacity>
+                      {profile && StorageService.canUserDeleteList(selectedList, profile.id) ? (
+                        <>
+                        <TouchableOpacity
+                          style={styles.visibilityListBtn}
+                          onPress={() => openEditList(selectedList)}
+                          activeOpacity={0.8}
+                          accessibilityLabel="Editar lista"
+                        >
+                          <Ionicons name="create-outline" size={14} color="#CBD5E1" />
+                          <Text style={styles.visibilityListBtnText}>Editar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.inviteListBtn}
+                          onPress={() => setIsInviteUsersVisible(true)}
+                          activeOpacity={0.8}
+                          accessibilityLabel="Invitar usuarios a la lista"
+                        >
+                          <Ionicons name="person-add-outline" size={14} color="#38BDF8" />
+                          <Text style={styles.inviteListBtnText}>
+                            Invitar{selectedList.pendingInvites?.length ? ` (${selectedList.pendingInvites.length})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.deleteListBtn}
+                          onPress={() => setIsDeleteListConfirmVisible(true)}
+                          activeOpacity={0.8}
+                          accessibilityLabel="Eliminar lista"
+                        >
+                          <Ionicons name="trash-outline" size={14} color="#F87171" />
+                          <Text style={styles.deleteListBtnText}>Eliminar</Text>
+                        </TouchableOpacity>
+                        </>
+                      ) : profile ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.followListBtn,
+                            followedListIds.includes(selectedList.id) && styles.followListBtnActive,
+                          ]}
+                          onPress={() => handleToggleFollowList(selectedList.id)}
+                          activeOpacity={0.8}
+                          accessibilityLabel={
+                            followedListIds.includes(selectedList.id)
+                              ? 'Dejar de seguir lista'
+                              : 'Seguir lista'
+                          }
+                        >
+                          <Ionicons
+                            name={followedListIds.includes(selectedList.id) ? 'bookmark' : 'bookmark-outline'}
+                            size={14}
+                            color={followedListIds.includes(selectedList.id) ? '#38BDF8' : '#94A3B8'}
+                          />
+                          <Text
+                            style={[
+                              styles.followListBtnText,
+                              followedListIds.includes(selectedList.id) && styles.followListBtnTextActive,
+                            ]}
+                          >
+                            {followedListIds.includes(selectedList.id) ? 'Siguiendo' : 'Seguir'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.followListBtn}
+                          onPress={() => setIsAuthModalVisible(true)}
+                          activeOpacity={0.8}
+                          accessibilityLabel="Inicia sesión para seguir la lista"
+                        >
+                          <Ionicons name="bookmark-outline" size={14} color="#94A3B8" />
+                          <Text style={styles.followListBtnText}>Seguir</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {/* Roulette button "¿Qué vemos hoy?" */}
+                    <TouchableOpacity
+                      style={styles.rouletteButton}
+                      onPress={() => setIsRouletteVisible(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="dice" size={18} color="#0F172A" />
+                      <Text style={styles.rouletteButtonText}>¿Qué vemos hoy?</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Category Filter Chips */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
+                    <TouchableOpacity
+                      style={[styles.filterChip, activeCategoryFilter === 'all' && styles.activeFilterChip]}
+                      onPress={() => setCategoryFilter('all')}
+                    >
+                      <Text style={[styles.filterChipText, activeCategoryFilter === 'all' && styles.activeFilterChipText]}>
+                        Todos ({visibleListItems.length})
+                      </Text>
+                    </TouchableOpacity>
+                    {profile && !showPastEvents && (watchedVisibleCount > 0 || hideWatched) ? (
+                      <TouchableOpacity
+                        style={[styles.filterChip, styles.hideWatchedChip, hideWatched && styles.activeFilterChip]}
+                        onPress={() => setHideWatched(prev => !prev)}
+                        accessibilityState={{ selected: hideWatched }}
+                        accessibilityLabel="Ocultar vistos"
+                      >
+                        <Ionicons
+                          name={hideWatched ? 'eye-off' : 'eye-off-outline'}
+                          size={12}
+                          color={hideWatched ? '#0F172A' : '#94A3B8'}
+                        />
+                        <Text style={[styles.filterChipText, hideWatched && styles.activeFilterChipText]}>
+                          Ocultar vistos ({watchedVisibleCount})
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {pastEvents.length > 0 ? (
+                      <TouchableOpacity
+                        style={[styles.filterChip, styles.pastEventsChip, showPastEvents && styles.pastEventsChipActive]}
+                        onPress={() => setPastEventsView({ listId: selectedList.id, active: !showPastEvents })}
+                        accessibilityState={{ selected: showPastEvents }}
+                        accessibilityLabel="Ver eventos pasados"
+                      >
+                        <Text style={[styles.filterChipText, showPastEvents && styles.pastEventsChipTextActive]}>
+                          🕘 Eventos pasados ({pastEvents.length})
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {LIST_CONTENT_TYPES.filter(
+                      type => type.key !== 'other' && getAllowedCategories(selectedList).includes(type.key)
+                    ).map(type => (
+                      <TouchableOpacity
+                        key={type.key}
+                        style={[styles.filterChip, categoryFilter === type.key && styles.activeFilterChip]}
+                        onPress={() => setCategoryFilter(type.key as MediaCategory)}
+                      >
+                        <Text style={[styles.filterChipText, categoryFilter === type.key && styles.activeFilterChipText]}>
+                          {type.emoji} {type.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  {/* In-list search & sorting */}
+                  <View style={styles.itemSearchBar}>
+                    <Ionicons name="search" size={16} color="#64748B" />
+                    <TextInput
+                      style={styles.itemSearchInput}
+                      placeholder="Buscar en esta lista..."
+                      placeholderTextColor="#64748B"
+                      value={itemSearchQuery}
+                      onChangeText={setItemSearchQuery}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="search"
+                      accessibilityLabel="Buscar dentro de la lista"
+                    />
+                    {!!itemSearchQuery && (
+                      <TouchableOpacity onPress={() => setItemSearchQuery('')} accessibilityLabel="Limpiar búsqueda">
+                        <Ionicons name="close-circle" size={18} color="#64748B" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={styles.sortRow}>
+                    <Ionicons name="swap-vertical" size={14} color="#64748B" />
+                    {([
+                      { mode: 'recent', label: 'Recientes' },
+                      { mode: 'list', label: '★ Lista' },
+                      { mode: 'critic', label: '★ Crítica' },
+                    ] as { mode: ItemSortMode; label: string }[]).map(option => (
+                      <TouchableOpacity
+                        key={option.mode}
+                        style={[styles.sortChip, itemSortMode === option.mode && styles.sortChipActive]}
+                        onPress={() => setItemSortMode(option.mode)}
+                        accessibilityState={{ selected: itemSortMode === option.mode }}
+                      >
+                        <Text style={[styles.sortChipText, itemSortMode === option.mode && styles.sortChipTextActive]}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : null
+            }
             renderSectionHeader={({ section }) => (
               <View style={styles.itemSectionHeader}>
                 <Text style={styles.itemSectionTitle}>{section.title}</Text>
@@ -1481,11 +1505,17 @@ function MainApp({ clerkEnabled = false }: { clerkEnabled?: boolean }) {
               <View style={styles.emptyItemsView}>
                 <Ionicons name="film-outline" size={54} color="#334155" />
                 <Text style={styles.emptyTitle}>
-                  {showPastEvents ? 'Sin eventos pasados que coincidan' : 'Lista vacía o sin coincidencias'}
+                  {showPastEvents
+                    ? 'Sin eventos pasados que coincidan'
+                    : isHidingWatched && watchedVisibleCount > 0
+                    ? 'Nada pendiente por aquí'
+                    : 'Lista vacía o sin coincidencias'}
                 </Text>
                 <Text style={styles.emptySubtitle}>
                   {showPastEvents
                     ? 'Los eventos ya celebrados de esta lista aparecen aquí.'
+                    : isHidingWatched && watchedVisibleCount > 0
+                    ? 'Ya viste todo lo que coincide con estos filtros. Desactiva «Ocultar vistos» para verlo de nuevo.'
                     : canAddToSelectedList
                     ? 'Toca «+ Agregar a la lista» para buscar con la API de JustWatch o ingresar un título manualmente.'
                     : 'Todavía no hay elementos que coincidan.'}
@@ -2097,8 +2127,8 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   activeListHeader: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
+    // Va dentro del contentContainer del listado, que ya aplica el padding horizontal.
+    paddingTop: 2,
     paddingBottom: 6,
   },
   listTitleBlock: {
@@ -2238,6 +2268,11 @@ const styles = StyleSheet.create({
   },
   filtersScroll: {
     marginBottom: 6,
+  },
+  hideWatchedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   filterChip: {
     paddingHorizontal: 10,
