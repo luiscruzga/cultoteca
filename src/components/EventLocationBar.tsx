@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { describeEventLocation, EventSearchLocation, isDeviceLocation } from '../services/api/eventSearchService';
+import {
+  describeEventLocation,
+  EVENT_RADIUS_OPTIONS_KM,
+  EventSearchLocation,
+  isDeviceLocation,
+} from '../services/api/eventSearchService';
 
 export type EventLocationStatus = 'idle' | 'locating' | 'denied' | 'unavailable';
 
 interface EventLocationBarProps {
   location: EventSearchLocation | null;
   status: EventLocationStatus;
+  radiusKm: number;
+  onChangeRadius: (radiusKm: number) => void;
   onUseDeviceLocation: () => void;
   onSubmitCity: (city: string) => void;
   onClear: () => void;
@@ -20,6 +27,8 @@ interface EventLocationBarProps {
 export const EventLocationBar: React.FC<EventLocationBarProps> = ({
   location,
   status,
+  radiusKm,
+  onChangeRadius,
   onUseDeviceLocation,
   onSubmitCity,
   onClear,
@@ -55,7 +64,7 @@ export const EventLocationBar: React.FC<EventLocationBarProps> = ({
           <Ionicons name="location-outline" size={16} color="#64748B" />
           <TextInput
             style={styles.cityInput}
-            placeholder="o escribe una ciudad"
+            placeholder="o escribe una ciudad o comuna"
             placeholderTextColor="#64748B"
             value={city}
             onChangeText={setCity}
@@ -83,6 +92,26 @@ export const EventLocationBar: React.FC<EventLocationBarProps> = ({
             <Ionicons name="close-circle" size={16} color="#94A3B8" />
           </TouchableOpacity>
         </View>
+      ) : null}
+      {location ? (
+        <View style={styles.radiusRow}>
+          <Text style={styles.radiusLabel}>Radio</Text>
+          {EVENT_RADIUS_OPTIONS_KM.map(option => {
+            const active = option === radiusKm;
+            return (
+              <TouchableOpacity
+                key={option}
+                style={[styles.radiusChip, active && styles.radiusChipActive]}
+                onPress={() => onChangeRadius(option)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Buscar en un radio de ${option} kilómetros`}
+              >
+                <Text style={[styles.radiusChipText, active && styles.radiusChipTextActive]}>{option} km</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       ) : status === 'denied' ? (
         <Text style={styles.warningText}>
           Sin permiso de ubicación. Actívalo en los ajustes del sistema o escribe una ciudad.
@@ -90,7 +119,9 @@ export const EventLocationBar: React.FC<EventLocationBarProps> = ({
       ) : status === 'unavailable' ? (
         <Text style={styles.warningText}>No se pudo obtener tu ubicación. Prueba de nuevo o escribe una ciudad.</Text>
       ) : (
-        <Text style={styles.hintText}>Con una ubicación y sin texto verás los próximos eventos a tu alrededor.</Text>
+        <Text style={styles.hintText}>
+          Con una ubicación y sin texto verás los próximos eventos a tu alrededor (Puntoticket, Ticketpro, Ticketplus y más).
+        </Text>
       )}
     </View>
   );
@@ -161,6 +192,36 @@ const styles = StyleSheet.create({
   },
   clearBtn: {
     padding: 2,
+  },
+  radiusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  radiusLabel: {
+    color: '#64748B',
+    fontSize: 12,
+    marginRight: 2,
+  },
+  radiusChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#1E293B',
+  },
+  radiusChipActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+  },
+  radiusChipText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  radiusChipTextActive: {
+    color: '#38BDF8',
   },
   warningText: {
     color: '#FBBF24',

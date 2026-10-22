@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -12,8 +13,9 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AVATAR_PRESETS, AvatarPreset } from '../constants/avatarPresets';
+import { AvatarCategoryKey, PHOTO_CATEGORIES } from '../constants/avatarPresets';
 import { AvatarSearchResult, AvatarSearchService } from '../services/avatarSearchService';
+import { remoteImageSource } from '../utils/remoteImage';
 import { UserAvatar } from './UserAvatar';
 
 interface AvatarPickerModalProps {
@@ -24,6 +26,8 @@ interface AvatarPickerModalProps {
   onSelectAvatar: (newAvatar?: string) => void;
   title?: string;
   subtitle?: string;
+  /** `cover`: portada de lista, con categorías de fotos y miniaturas cuadradas. */
+  variant?: 'avatar' | 'cover';
 }
 
 export interface AvatarDisplayItem {
@@ -34,19 +38,34 @@ export interface AvatarDisplayItem {
   source?: string;
 }
 
-type TabCategory = 'all' | 'anime' | 'cine_series' | 'graciosas' | 'clasicos';
+const CATEGORIES: { key: AvatarCategoryKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'paisajes', label: 'Paisajes', icon: 'image-outline' },
+  { key: 'ciudades', label: 'Ciudades', icon: 'business-outline' },
+  { key: 'arte', label: 'Arte', icon: 'color-palette-outline' },
+  { key: 'espacio', label: 'Espacio', icon: 'planet-outline' },
+  { key: 'anime', label: 'Anime & Manga', icon: 'flash-outline' },
+  { key: 'cine_series', label: 'Cine & Series', icon: 'film-outline' },
+  { key: 'comics', label: 'Cómics', icon: 'shield-outline' },
+  { key: 'musica', label: 'Música', icon: 'musical-notes-outline' },
+  { key: 'animacion', label: 'Animación', icon: 'happy-outline' },
+  { key: 'videojuegos', label: 'Videojuegos', icon: 'game-controller-outline' },
+  { key: 'libros', label: 'Libros', icon: 'book-outline' },
+  { key: 'historicos', label: 'Históricos', icon: 'library-outline' },
+  { key: 'graciosas', label: 'Divertidas', icon: 'sparkles-outline' },
+];
 
 interface AvatarSearchFieldProps {
   value: string;
   isSearching: boolean;
   onChangeText: (text: string) => void;
   onClear: () => void;
+  placeholder: string;
 }
 
 // Focus state lives here, not in AvatarPickerModal: re-rendering the <Modal> on Android reapplies the
 // dialog window flags (ReactModalHostView.updateProperties), which closes the keyboard and blurs
 // the input right after it is tapped.
-const AvatarSearchField: React.FC<AvatarSearchFieldProps> = ({ value, isSearching, onChangeText, onClear }) => {
+const AvatarSearchField: React.FC<AvatarSearchFieldProps> = ({ value, isSearching, onChangeText, onClear, placeholder }) => {
   const [isFocused, setIsFocused] = useState(false);
   return (
     <View style={[styles.searchBar, isFocused && styles.searchBarFocused]}>
@@ -61,7 +80,7 @@ const AvatarSearchField: React.FC<AvatarSearchFieldProps> = ({ value, isSearchin
           styles.searchInput,
           Platform.OS === 'web' && { outlineStyle: 'none' as any },
         ]}
-        placeholder="Buscar personajes (Goku, Merlina, Walter, Batman)..."
+        placeholder={placeholder}
         placeholderTextColor="#64748B"
         value={value}
         onChangeText={onChangeText}
@@ -88,16 +107,53 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
   onSelectAvatar,
   title = 'Galería de Avatares',
   subtitle,
+  variant = 'avatar',
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<TabCategory>('all');
+  const isCover = variant === 'cover';
+  const categories = useMemo(
+    () => (isCover ? CATEGORIES : CATEGORIES.filter(cat => !PHOTO_CATEGORIES.includes(cat.key))),
+    [isCover]
+  );
+  const [selectedCategory, setSelectedCategory] = useState<AvatarCategoryKey>(categories[0].key);
   const [activeAvatar, setActiveAvatar] = useState<string | undefined>(currentAvatar);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<AvatarSearchResult[]>([]);
+  const [categoryItems, setCategoryItems] = useState<Partial<Record<AvatarCategoryKey, AvatarSearchResult[]>>>({});
+  const categoryRequestsRef = useRef(new Set<AvatarCategoryKey>());
+  // URLs que no cargaron: se ocultan en lugar de dejar un círculo vacío
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setActiveAvatar(currentAvatar);
   }, [currentAvatar]);
+
+  // Una categoría sin entrada en categoryItems está cargando; [] significa que no respondió ninguna fuente
+  const loadCategory = useCallback(async (category: AvatarCategoryKey) => {
+    if (categoryRequestsRef.current.has(category)) return;
+    categoryRequestsRef.current.add(category);
+    let items: AvatarSearchResult[] = [];
+    try {
+      items = await AvatarSearchService.browse(category);
+    } catch (e) {
+      console.warn('Avatar category error:', e);
+    } finally {
+      categoryRequestsRef.current.delete(category);
+    }
+    setCategoryItems(prev => ({ ...prev, [category]: items }));
+  }, []);
+
+  useEffect(() => {
+    if (visible && !categoryItems[selectedCategory]) loadCategory(selectedCategory);
+  }, [visible, selectedCategory, categoryItems, loadCategory]);
+
+  const retryCategory = (category: AvatarCategoryKey) => {
+    setCategoryItems(prev => {
+      const next = { ...prev };
+      delete next[category];
+      return next;
+    });
+  };
 
   // Live search debounce
   useEffect(() => {
@@ -107,36 +163,35 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
       return;
     }
 
+    let cancelled = false;
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const results = await AvatarSearchService.search(searchQuery.trim());
-        setSearchResults(results);
+        const results = await AvatarSearchService.search(searchQuery.trim(), { includePhotos: isCover });
+        if (!cancelled) setSearchResults(results);
       } catch (e) {
         console.warn('Avatar search error:', e);
       } finally {
-        setIsSearching(false);
+        if (!cancelled) setIsSearching(false);
       }
-    }, 350);
+    }, 400);
 
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, isCover]);
 
-  const categories: { key: TabCategory; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { key: 'all', label: 'Todos', icon: 'grid-outline' },
-    { key: 'anime', label: 'Anime & Manga', icon: 'flash-outline' },
-    { key: 'cine_series', label: 'Cine & Series', icon: 'film-outline' },
-    { key: 'graciosas', label: 'Divertidas', icon: 'happy-outline' },
-    { key: 'clasicos', label: 'Clásicos', icon: 'videocam-outline' },
-  ];
-
-  const presetsToDisplay: AvatarDisplayItem[] =
-    selectedCategory === 'all'
-      ? AVATAR_PRESETS
-      : AVATAR_PRESETS.filter(p => p.category === selectedCategory);
+  const markFailed = useCallback((url: string) => {
+    setFailedUrls(prev => (prev.has(url) ? prev : new Set(prev).add(url)));
+  }, []);
 
   const isSearchActive = searchQuery.trim().length >= 2;
-  const itemsToDisplay: AvatarDisplayItem[] = isSearchActive ? searchResults : presetsToDisplay;
+  const rawItems = isSearchActive ? searchResults : categoryItems[selectedCategory] || [];
+  const itemsToDisplay: AvatarDisplayItem[] = rawItems.filter(item => !failedUrls.has(item.url));
+  const isCategoryLoading = !isSearchActive && categoryItems[selectedCategory] === undefined;
+  const categoryLoadedEmpty =
+    !isSearchActive && !isCategoryLoading && categoryItems[selectedCategory] !== undefined && itemsToDisplay.length === 0;
 
   const handleChoose = (url?: string) => {
     setActiveAvatar(url);
@@ -148,6 +203,42 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
     setActiveAvatar(undefined);
     onSelectAvatar(undefined);
     onClose();
+  };
+
+  const renderEmpty = () => {
+    if (isSearching || isCategoryLoading) {
+      return (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color="#E50914" />
+        </View>
+      );
+    }
+    if (isSearchActive) {
+      return (
+        <View style={styles.emptyState}>
+          <Ionicons name="search-outline" size={36} color="#64748B" />
+          <Text style={styles.emptyTitle}>Sin resultados</Text>
+          <Text style={styles.emptySubtitle}>
+            No encontramos imágenes para «{searchQuery}». Prueba con otro término (ej. Frida Kahlo, Batman, Queen
+            {isCover ? ', Patagonia' : ''}).
+          </Text>
+        </View>
+      );
+    }
+    if (categoryLoadedEmpty) {
+      return (
+        <View style={styles.emptyState}>
+          <Ionicons name="cloud-offline-outline" size={36} color="#64748B" />
+          <Text style={styles.emptyTitle}>No se pudo cargar</Text>
+          <Text style={styles.emptySubtitle}>Revisa tu conexión e inténtalo de nuevo.</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => retryCategory(selectedCategory)}>
+            <Ionicons name="refresh" size={14} color="#FFFFFF" />
+            <Text style={styles.retryBtnText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return null;
   };
 
   return (
@@ -186,7 +277,9 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
               </Text>
               <TouchableOpacity style={styles.initialsActionBtn} onPress={handleUseInitials}>
                 <Ionicons name="text-outline" size={14} color="#38BDF8" />
-                <Text style={styles.initialsActionText}>Usar solo mis iniciales</Text>
+                <Text style={styles.initialsActionText}>
+                  {isCover ? 'Usar solo las iniciales' : 'Usar solo mis iniciales'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -198,6 +291,11 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
               isSearching={isSearching}
               onChangeText={setSearchQuery}
               onClear={() => setSearchQuery('')}
+              placeholder={
+                isCover
+                  ? 'Busca lo que quieras (Patagonia, Tokio, Van Gogh, Goku)...'
+                  : 'Busca personajes, artistas, autores, héroes...'
+              }
             />
           </View>
 
@@ -238,29 +336,20 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
             <View style={styles.searchStatusHeader}>
               <Text style={styles.searchStatusText}>
                 {isSearching
-                  ? 'Buscando personajes...'
-                  : `${searchResults.length} personajes encontrados para «${searchQuery}»`}
+                  ? 'Buscando en Wikipedia, AniList, TMDB, Deezer y más...'
+                  : `${itemsToDisplay.length} imágenes encontradas para «${searchQuery}»`}
               </Text>
             </View>
           )}
 
-          {/* Presets / Search Results Grid */}
+          {/* Category / Search Results Grid */}
           <FlatList
-            data={itemsToDisplay}
+            data={isSearching || isCategoryLoading ? [] : itemsToDisplay}
             keyExtractor={item => item.id}
             numColumns={3}
             contentContainerStyle={styles.gridContent}
-            ListEmptyComponent={
-              !isSearching && isSearchActive ? (
-                <View style={styles.emptyState}>
-                  <Ionicons name="search-outline" size={36} color="#64748B" />
-                  <Text style={styles.emptyTitle}>Sin resultados</Text>
-                  <Text style={styles.emptySubtitle}>
-                    No encontramos personajes con «{searchQuery}». Intenta con otro término (ej. Naruto, Luffy, Walter, Neo).
-                  </Text>
-                </View>
-              ) : null
-            }
+            initialNumToRender={12}
+            ListEmptyComponent={renderEmpty}
             renderItem={({ item }) => {
               const isSelected = activeAvatar === item.url;
               return (
@@ -270,7 +359,15 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
                   activeOpacity={0.8}
                 >
                   <View style={styles.presetAvatarWrapper}>
-                    <UserAvatar name={item.name} avatar={item.url} size={70} />
+                    {isCover ? (
+                      <Image
+                        source={remoteImageSource(item.url)}
+                        style={styles.coverThumb}
+                        onError={() => markFailed(item.url)}
+                      />
+                    ) : (
+                      <UserAvatar name={item.name} avatar={item.url} size={70} onImageError={markFailed} />
+                    )}
                     {isSelected && (
                       <View style={styles.selectedBadge}>
                         <Ionicons name="checkmark" size={12} color="#FFFFFF" />
@@ -280,6 +377,11 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({
                   <Text style={styles.presetName} numberOfLines={2}>
                     {item.name}
                   </Text>
+                  {isSearchActive && item.source ? (
+                    <Text style={styles.presetSource} numberOfLines={1}>
+                      {item.source}
+                    </Text>
+                  ) : null}
                 </TouchableOpacity>
               );
             }}
@@ -497,6 +599,33 @@ const styles = StyleSheet.create({
     color: '#CBD5E1',
     textAlign: 'center',
     lineHeight: 14,
+  },
+  coverThumb: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    backgroundColor: '#1E293B',
+  },
+  presetSource: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 2,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#E50914',
+  },
+  retryBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   emptyState: {
     paddingVertical: 40,

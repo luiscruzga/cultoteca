@@ -4,7 +4,7 @@ const appJson = require('../../app.json');
 // Wikimedia rejects (HTTP 403) requests carrying Android's default `okhttp/x` User-Agent.
 // See https://w.wiki/4wJS
 const WIKIMEDIA_HOST = /^https?:\/\/([a-z0-9-]+\.)*(wikimedia|wikipedia|wikidata)\.org\//i;
-const USER_AGENT = `Cultoteca/${appJson?.expo?.version || '1.0.0'} (${Platform.OS}; +https://cultoteca.app)`;
+export const USER_AGENT = `Cultoteca/${appJson?.expo?.version || '1.0.0'} (${Platform.OS}; +https://cultoteca.app)`;
 
 /** Image source for a remote URL, adding an identifiable User-Agent where the host requires it. */
 export const remoteImageSource = (uri?: string | null): ImageURISource => {
@@ -14,6 +14,17 @@ export const remoteImageSource = (uri?: string | null): ImageURISource => {
   }
   return { uri };
 };
+
+/** `fetch` that identifies the app to Wikimedia APIs, which reject Android's default User-Agent. */
+export const wikimediaFetch = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(Platform.OS !== 'web' ? { 'User-Agent': USER_AGENT } : {}),
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
 
 /**
  * Highest-resolution variant of a known provider image URL (for the enlarged viewer).

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, ImageStyle, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { remoteImageSource } from '../utils/remoteImage';
 
@@ -10,6 +10,8 @@ interface UserAvatarProps {
   imageStyle?: StyleProp<ImageStyle>;
   borderColor?: string;
   borderWidth?: number;
+  /** Se llama cuando la imagen no carga (el avatar pasa a mostrar las iniciales). */
+  onImageError?: (uri: string) => void;
 }
 
 const STOCK_UNSPLASH_PLACEHOLDER = 'photo-1535713875002-d1d0cf377fde';
@@ -52,9 +54,13 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   imageStyle,
   borderColor,
   borderWidth,
+  onImageError,
 }) => {
+  // URL que falló al cargar: se recuerda por valor para volver a intentarlo si cambia el avatar
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const hasValidCustomAvatar =
-    Boolean(avatar && avatar.trim().length > 0 && !avatar.includes(STOCK_UNSPLASH_PLACEHOLDER));
+    Boolean(avatar && avatar.trim().length > 0 && !avatar.includes(STOCK_UNSPLASH_PLACEHOLDER)) &&
+    avatar !== failedUri;
 
   const borderStyles = borderColor
     ? {
@@ -80,6 +86,10 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
             { width: size, height: size, borderRadius: size / 2 },
             imageStyle,
           ]}
+          onError={() => {
+            setFailedUri(avatar!);
+            onImageError?.(avatar!);
+          }}
         />
       </View>
     );

@@ -235,10 +235,11 @@ export const ListFormModal: React.FC<ListFormModalProps> = ({ visible, list, sav
         onClose={() => setIsIconPickerVisible(false)}
         currentAvatar={values.coverImage}
         userName={values.title || 'Lista'}
-        title="Ícono de la lista"
-        subtitle="Elige una imagen cultural para identificar tu lista"
+        title="Imagen de la lista"
+        subtitle="Elige una foto, obra o personaje para identificar tu lista"
+        variant="cover"
         onSelectAvatar={url => {
-          if (url) set('coverImage', url);
+          set('coverImage', url);
           setIsIconPickerVisible(false);
         }}
       />

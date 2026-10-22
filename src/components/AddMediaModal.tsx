@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { MIN_SEARCH_QUERY_LENGTH, searchMedia } from '../services/api/mediaSearchService';
-import { EventSearchLocation, searchEvents } from '../services/api/eventSearchService';
+import { DEFAULT_EVENT_RADIUS_KM, EventSearchLocation, searchEvents } from '../services/api/eventSearchService';
 import { getCurrentDeviceLocation } from '../services/locationService';
 import { formatEventDateShort } from '../utils/eventDates';
 import { EventAddOptions, EventAddOptionsSheet } from './EventAddOptionsSheet';
@@ -210,6 +210,9 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
   // Búsqueda de eventos: ubicación elegida, estado del permiso y respuesta del backend
   const [eventLocation, setEventLocation] = useState<EventSearchLocation | null>(null);
   const [eventLocationStatus, setEventLocationStatus] = useState<EventLocationStatus>('idle');
+  const [eventRadiusKm, setEventRadiusKm] = useState(DEFAULT_EVENT_RADIUS_KM);
+  // El radio se lee desde un ref para que una búsqueda lanzada justo al cambiarlo use el valor nuevo
+  const eventRadiusRef = useRef(DEFAULT_EVENT_RADIUS_KM);
   const [eventSearchStatus, setEventSearchStatus] = useState<{ configured: boolean; error?: string } | null>(null);
   // Evento elegido en la búsqueda a la espera de avisos y "ocultar al pasar"
   const [pendingEventItem, setPendingEventItem] = useState<MediaItem | null>(null);
@@ -278,7 +281,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     try {
       if (category === 'event') {
         // Directo al proveedor de eventos para saber si el backend lo tiene configurado
-        const result = await searchEvents(text, { limit: 12, near: near ?? undefined, signal: controller.signal });
+        const result = await searchEvents(text, {
+          limit: 20,
+          near: near ?? undefined,
+          radiusKm: eventRadiusRef.current,
+          signal: controller.signal,
+        });
         if (requestId === currentRequestIdRef.current) {
           setSearchResults(result.items);
           setEventSearchStatus({ configured: result.configured, error: result.error });
@@ -343,6 +351,12 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
     setEventLocation(near);
     setEventLocationStatus('idle');
     handleSearch(searchQuery, 'event', true, near);
+  };
+
+  const handleChangeEventRadius = (radiusKm: number) => {
+    eventRadiusRef.current = radiusKm;
+    setEventRadiusKm(radiusKm);
+    handleSearch(searchQuery, 'event', true);
   };
 
   const handleUseDeviceLocation = async () => {
@@ -738,6 +752,8 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
               <EventLocationBar
                 location={eventLocation}
                 status={eventLocationStatus}
+                radiusKm={eventRadiusKm}
+                onChangeRadius={handleChangeEventRadius}
                 onUseDeviceLocation={handleUseDeviceLocation}
                 onSubmitCity={city => applyEventLocation({ city })}
                 onClear={() => applyEventLocation(null)}
@@ -788,7 +804,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                       {selectedCategory === 'event'
                         ? eventSearchStatus && !eventSearchStatus.configured
                           ? 'La búsqueda de eventos no está configurada en el servidor. Puedes agregar un evento desde las pestañas Enlace o Manual.'
-                          : 'Escribe un nombre (p. ej. stand up) o toca «Cerca de mí» para ver los próximos eventos a tu alrededor.'
+                          : 'Escribe un artista, show o comuna (p. ej. stand up, Viña del Mar) o toca «Cerca de mí» para ver los próximos eventos a tu alrededor.'
                         : 'Consulta catálogos globales de streaming, series, libros y anime.'}
                     </Text>
                   </View>
@@ -808,6 +824,7 @@ export const AddMediaModal: React.FC<AddMediaModalProps> = ({
                         <Text style={styles.resultEventMeta} numberOfLines={2}>
                           📅 {formatEventDateShort(item.eventStartsAt, item.eventAllDay)}
                           {item.eventLocation ? ` · ${item.eventLocation}` : ''}
+                          {item.siteName ? ` · ${item.siteName}` : ''}
                         </Text>
                       ) : (
                         <Text style={styles.resultMeta} numberOfLines={1}>
